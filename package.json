@@ -1,0 +1,27 @@
+{
+  "name": "crtk",
+  "version": "1.0.0",
+  "description": "Yet another JS coroutine toolkit based on ES6 generators",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "es6",
+    "yield",
+    "generator",
+    "coroutine",
+    "flow",
+    "async"
+  ],
+  "author": "mikle33@yandex.ru",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sbtrn-devil/ctrk"
+  },
+  "engines": {
+    "iojs": ">= 1.0.0",
+    "node": ">= 0.12.0"
+  }
+}
