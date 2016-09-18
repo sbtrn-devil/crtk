@@ -361,7 +361,7 @@ const Awaiter = module.exports.Awaiter = function Awaiter() {
 // Checkpoint
 //
 
-CheckpointResult = module.exports.checkpointResult =
+CheckpointResult = module.exports.CheckpointResult =
 function CheckpointResult(errors, results) {
 	this.errors = errors;
 	this.results = results;
@@ -396,7 +396,7 @@ function checkpointCreate(arrayOfAwaiters, waitUpTo) {
 		throw new Error("Wait up to " + waitUpTo + " awaiters requested, only " + arrayOfAwaiters.length + " provided");
 	}
 	var completedSoFar = 0, errors = [], results = [],
-		stopOn1stError = false, mustCancelOnFailure = false, cancelMsg,
+		stopOn1stError = false, mustCancelAbandoned = false, cancelMsg,
 		done = false;
 	const finalAwaiter = Awaiter();
 	finalAwaiter.__proto__ = {
@@ -409,6 +409,7 @@ function checkpointCreate(arrayOfAwaiters, waitUpTo) {
 		}
 	};
 
+	var canceled = false;
 	if (waitUpTo <= 0) {
 		// nothing to wait, trigger at once
 		finalAwaiter(null, new CheckpointResult(errors, results));
@@ -427,26 +428,35 @@ function checkpointCreate(arrayOfAwaiters, waitUpTo) {
 						// return or throw
 						finalAwaiter(haveErrors ? finalResult : null,
 							haveErrors ? null : finalResult);
-						if (haveErrors && mustCancelOnFailure) {
+						if (mustCancelAbandoned && !canceled) {
+							canceled = true; // considering this a cancel
 							for (var awaiter of arrayOfAwaiters) {
-								typeof(awaiter.cancel) == "function" &&
-								awaiter.cancel(cancelMsg);
+								if (!awaiter.done) {
+									typeof(awaiter.cancel) == "function" &&
+									awaiter.cancel(cancelMsg);
+								}
 							}
 						}
-						arrayOfAwaiters = null; // give freedom to GC
+						if (completedSoFar >= arrayOfAwaiters.length) {
+							// no longer use in the list, it can be disposed
+							arrayOfAwaiters = null;
+						}
 					}
 				}
 			});
 		}
 	}
-	var canceled = false;
-	return ({
+
+	var me;
+	return (me = {
 		stopOnFirstError: function stopOnFirstError(yes) {
 			stopOn1stError = yes;
+			return me;
 		},
-		cancelOnFailure: function cancelOnFailure(yes, withMsg) {
-			mustCancelOnFailure = yes;
+		cancelAbandoned: function cancelAbandoned(yes, withMsg) {
+			mustCancelAbandoned = yes;
 			cancelMsg = withMsg;
+			return me;
 		},
 		await: finalAwaiter.await.bind(finalAwaiter),
 		cancel: function cancel(msg) {
@@ -454,8 +464,14 @@ function checkpointCreate(arrayOfAwaiters, waitUpTo) {
 				canceled = true;
 				if (arrayOfAwaiters) {
 					for (var awaiter of arrayOfAwaiters) {
-						typeof(awaiter.cancel) == "function" && awaiter.cancel(msg);
+						if (!awaiter.done) {
+							typeof(awaiter.cancel) == "function" && awaiter.cancel(msg);
+						}
 					}
+				}
+				if (done) {
+					// no longer use in the list, it can be disposed
+					arrayOfAwaiters = null;
 				}
 			}
 		},

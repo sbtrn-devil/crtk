@@ -35,9 +35,11 @@ An object compliant with `'Cancellable'` interface must provides the following f
 
 - `cancelMsg`: _any_ - optional extra cancellation message
 
-Initiate the cancel. `Cancellable` assumes that an operation can only be canceled once, and cancellation is irrevertible, however `.cancel` must be always safe to call. Therefore, to comply with `Cancellable`, the implementor must ensure that 2nd and subscequent calls to `.cancel` are no-ops.
+Initiate the cancel. Actual cancellation operations do not need to be performed synchronously, `.cancel` may only initiate them. However, the following requirements must be met.
 
-Also, whatever the cancel means, the requirement is to not prevent the `'Awaitable'` from normal way of indicating completion (with `.done = true` and invocation of callbacks). Implementor may deliver cancel case as a special error.
+First, `Cancellable` assumes that an operation can only be canceled once, and cancellation is irrevertible, but `.cancel` must be always safe to call. Therefore, to comply with `Cancellable`, the implementor must ensure that 2nd and subscequent calls to `.cancel` are no-ops.
+
+Second, whatever the cancel means, the requirement is to not prevent the `'Awaitable'` from normal way of indicating completion (with `.done = true` and invocation of callbacks). Implementor may deliver cancel case as a special error.
 
 Cancel request may come with an attached cancellation message, specified by the canceler in `cancelMsg` argument. Use and meaning of this parameter are up to the implementor.
 
@@ -141,7 +143,7 @@ module.exports = function *myScriptMain() {
 }
 ```
 
-This concept is easy to get used to, as you keep some points in mind:
+This concept is easy to get used to, as long as you keep some points in mind:
 
 - The pseudo-globals are accessible in code running as a coroutine ONLY. If you call the same functions from a non-coroutine environment, the variables will be undefined (or refer to real globals with same names).
 
@@ -241,7 +243,7 @@ function *niftyCoroutine() {
 
 - `SYNC` is a one-shot callback. _The same_ callback instance only does the intended action once, all subsequent calls to it are no-ops.
 - After `yield *SYNCW()` is executed the `SYNC` starts referring to _new_ callback instance. Due to previous point, invocation of old callback will not cause coroutine resumption on the new `yield *SYNCW()`, so it is safe from this side.
-- `SYNC` can be invoked without yielding the coroutine. In this case next `yield *SYNCW()` will deliver the provided values in deferred manner:
+- `SYNC` can be invoked without yielding the coroutine. In this case next `yield *SYNCW()` will deliver the provided values immediately:
 
 ```js
 function *doATrick() {
@@ -269,7 +271,7 @@ function beginFlakyLoad(url, callback) {
 }
 ```
 
-In practice, all these points constitute the fact that `crtk`'s `SYNC`/`yield *SYNCW()` flow is protected against typical callback usage errors _on asynchronous service side_: double-trigger, invocation in intermediate service state, and synchronous invocation. It eliminates a bunch of possibilities for control flow bugs.
+In practice, all these points mean that `crtk`'s `SYNC`/`yield *SYNCW()` flow is protected against typical callback usage errors _from asynchronous service side_: double-trigger, invocation in intermediate service state, and synchronous invocation. So, when using `crtk`, a bunch of possibilities for control flow bugs due to flaky implementation of 3rd party libraries is eliminated in transparent manner.
 
 ### SYNCTL: _function(result)_
 
@@ -456,9 +458,9 @@ var crtnHandle = start(failousCrtn).await(function(err, result) {
 
 - `cancelMsg`: _any_
 
-Requests the coroutine to cancel. The cancel is enforced by making all subsequent `yield *SYNCW()`-s inside this coroutine (including currently pending one) to end immediately with throwing `Cancellation` object (see below). If coroutine's `.cancel` is invoked from the coroutine itself, it itself ends by throwing `Cancellation`.
+Requests the coroutine to cancel. The cancel is enforced by making all subsequent `yield *SYNCW()`-s inside this coroutine (including currently pending one) to end on next soonest asynchronous occasion with throwing `Cancellation` object (see below). If coroutine's `.cancel` is invoked from the coroutine itself, it itself ends synchronously by throwing `Cancellation`.
 
-Throwing semantics allows the coroutine to finalize its cancel gracefully in natural exception unwinding way.
+Throwing semantics allows the coroutine to finalize its cancellation gracefully in natural exception unwinding way.
 
 Remember that no more awaiting for asynchronous operations are allowed in the coroutine after cancellation. If your finalization logic needs ones you have to start that logic in a new coroutine.
 
@@ -739,13 +741,15 @@ function *test() {
 }
 ```
 
-In any outcome, `CheckpointResult` collects errors and results of the involved awaitables. An error of awaiting on the checkpoint itself is scored when at least one of the awaitables ends with an error. Note that checkpoint allows some behaviour of the checkpoint in this case is configurable (see `.stopOnFirstError` and `.cancelOnFailure`).
+In any outcome, `CheckpointResult` collects errors and results of the involved awaitables. An error of awaiting on the checkpoint itself is scored when at least one of the awaitables ends with an error. Note that some behaviour of the checkpoint in this case is configurable (see `.stopOnFirstError`).
 
 ### .cancel([cancelMsg]): _method_
 
 - `cancelMsg`: _any_ - optional cancel message
 
 Cancels the checkpoint. All pending `Awaitable`-s which are `Cancellable`-s are canceled as well, with the given cancel message.
+
+Note that calling `.cancel` even after checkpoint has finished is meaningful in `.stopOnFirstError` mode or for `.anyOf` checkpoint type.
 
 ### .stopOnFirstError(yes): _method: 'CheckpointInstance'_
 
@@ -762,26 +766,33 @@ function *failingOneMakesWaitingForOthersMeaningless() {
 }
 ```
 
-### .cancelOnFailure(yes): _method: 'CheckpointInstance'_
+### .cancelAbandoned(yes): _method: 'CheckpointInstance'_
 
-- `yes`: _Boolean_ - true if checkpoint must stop on first error, default is `false`
+- `yes`: _Boolean_ - true if checkpoint must cancel abandoned awaitables on early finish, default is `false`
 - return: the subject `'CheckpointInstance'`, use for chaining calls
 
-If a checkpoint fails early due to error on an `Awaitable`, other `Awaitable`-s normally are abandoned and are left to proceed as they do. But just leaving them running may not be always desirable. You can enable "cancel on failure" mode to force automatic checkpoint cancel if early failure is encountered.
+On early finish (in `.anyOf` mode or to error of an `Awaitable` in `.stopOnFirstError` mode), the remaining unfinished `Awaitable`-s are abandoned and normally are left to proceed to no effect on the checkpoint. But just leaving them running may not be always desirable. You can enable "cancel abandoned" mode to force automatic cancel if early finish is encountered.
+
+An alternative to using `.cancelAbandoned` is to use manual `.cancel` on a finished checkpoint.
 
 ```js
 function *digOrDie() {
   // wait for both, but cancel if any fails
   Checkpoint.allOf(start(diggerOne), start(diggerTwo))
   .stopOnFirstError(true)
-  .cancelOnFailure(true)
+  .cancelAbandoned(true)
   .await(SYNC), yield *SYNCW();
 
   // wait for a success or a failure of any,
-  // if in progress then stop any remaining ones on failure
+  // cancel the other ones as soon as we have an outcome
   Checkpoint.anyOf(start(diggerThree), start(diggerFour))
-  .cancelOnFailure(true)
+  .cancelAbandoned(true)
   .await(SYNC), yield *SYNCW();
+
+  // the same as above, but cancel manually
+  var checkpoint = Checkpoint.anyOf(start(diggerThree), start(diggerFour))
+  .await(SYNC), yield *SYNCW();
+  checkpoint.cancel();
 }
 ```
 

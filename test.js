@@ -224,6 +224,23 @@ var testCases = {
 		assert(result == 200, "Coroutine returned normal value");
 	},
 
+	"CRTK-SRC-B-5":
+	function *(log, assert) {
+		log("Test: SYNCTL throws on cancellation");
+		var c = start(function *() {
+			setTimeout(SYNCTL, 100), yield *SYNCW();
+		});
+		c.cancel();
+		try {
+			c.await(SYNC), yield *SYNCW();
+		} catch(e) {
+			assert(!(e instanceof Cancellation), "Awaiting on canceled coroutine throws Error instead of Cancellation");
+			assert(c.error instanceof Cancellation, "Cancellation is stored in canceled coroutine's handle.error");
+			return;
+		}
+		assert(false, "Awaiting canceled coroutine must throw");
+	},
+
 	//
 	// pseudo-global variables
 	//
@@ -352,6 +369,7 @@ var testCases = {
 		log("Test: Awaiter allows to await result after completed");
 		var aw = Awaiter();
 		aw(null, 100);
+		assert(aw.done, "Awaiter finished");
 		assert((aw.await(SYNC), yield *SYNCW()) == 100, "Got the result");
 	},
 
@@ -496,6 +514,217 @@ var testCases = {
 		assert(t1 == 2, "Plain listener triggered twice");
 		assert(t2 == 1, "Once-listener triggered once");
 	},
+
+	//
+	// checkpoint
+	//
+	"CRTK-SRC-G-1":
+	function *(log, assert) {
+		log("Test: allOf waits for all awaitables");
+		var f1 = false, f2 = false, f3 = false;
+		var ch1 = start(function *() {
+				setTimeout(SYNC, 100); yield *SYNCW();
+				f1 = true;
+			}),
+			ch2 = start(function *() {
+				setTimeout(SYNC, 250); yield *SYNCW();
+				f2 = true;
+			}),
+			ch3 = start(function *() {
+				setTimeout(SYNC, 500); yield *SYNCW();
+				f3 = true;
+			});
+		Checkpoint.allOf(ch1, ch2, ch3).await(SYNC), yield *SYNCW();
+		assert(f1, "Coroutine 1 finished");
+		assert(f2, "Coroutine 2 finished");
+		assert(f3, "Coroutine 3 finished");
+	},
+
+	"CRTK-SRC-G-2":
+	function *(log, assert) {
+		log("Test: anyOf waits for soonest awaitable");
+		var f1 = false, f2 = false, f3 = false;
+		var ch1 = start(function *() {
+				setTimeout(SYNC, 100); yield *SYNCW();
+				f1 = true;
+			}),
+			ch2 = start(function *() {
+				setTimeout(SYNC, 250); yield *SYNCW();
+				f2 = true;
+			}),
+			ch3 = start(function *() {
+				setTimeout(SYNC, 500); yield *SYNCW();
+				f3 = true;
+			});
+		Checkpoint.anyOf(ch1, ch2, ch3).await(SYNC), yield *SYNCW();
+		assert(f1, "Coroutine 1 finished on anyOf");
+		assert(!f2, "Coroutine 2 not finished on anyOf");
+		assert(!f3, "Coroutine 3 not finished on anyOf");
+
+		Checkpoint.allOf(ch1, ch2, ch3).await(SYNC), yield *SYNCW();
+		assert(f1, "Coroutine 1 finished at all");
+		assert(f2, "Coroutine 2 finished at all");
+		assert(f3, "Coroutine 3 finished at all");
+	},
+
+	"CRTK-SRC-G-3":
+	function *(log, assert) {
+		log("Test: allOf waits for all even if error");
+		var f1 = false, f2 = false, f3 = false;
+		var ch1 = start(function *() {
+				setTimeout(SYNC, 100); yield *SYNCW();
+				f1 = true;
+				throw new Error("test error");
+			}),
+			ch2 = start(function *() {
+				setTimeout(SYNC, 250); yield *SYNCW();
+				f2 = true;
+			}),
+			ch3 = start(function *() {
+				setTimeout(SYNC, 500); yield *SYNCW();
+				f3 = true;
+			});
+		var thrown = false;
+		try {
+			Checkpoint.allOf(ch1, ch2, ch3).await(SYNC), yield *SYNCW();
+		} catch(e) {
+			thrown = true;
+			assert(e instanceof CheckpointResult &&
+				e.errors.length == 1 &&
+				e.errors[0].message == "test error",
+				"Catched the expected error");
+		}
+		assert(f1, "Coroutine 1 finished");
+		assert(f2, "Coroutine 2 finished");
+		assert(f3, "Coroutine 3 finished");
+		assert(thrown, "Expected error was thrown");
+	},
+
+	"CRTK-SRC-G-4":
+	function *(log, assert) {
+		log("Test: allOf doesn't wait for remaining if stopOnFirstError");
+		var f1 = false, f2 = false, f3 = false;
+		var ch1 = start(function *() {
+				setTimeout(SYNC, 100); yield *SYNCW();
+				f1 = true;
+				throw new Error("test error");
+			}),
+			ch2 = start(function *() {
+				setTimeout(SYNC, 250); yield *SYNCW();
+				f2 = true;
+			}),
+			ch3 = start(function *() {
+				setTimeout(SYNC, 500); yield *SYNCW();
+				f3 = true;
+			});
+		var thrown = false;
+		try {
+			Checkpoint.allOf(ch1, ch2, ch3).stopOnFirstError(true)
+			.await(SYNC), yield *SYNCW();
+		} catch(e) {
+			thrown = true;
+		}
+		assert(f1, "Coroutine 1 finished");
+		assert(!f2, "Coroutine 2 not finished");
+		assert(!f3, "Coroutine 3 not finished");
+		assert(thrown, "Error was thrown");
+
+		try {
+			thrown = false;
+			Checkpoint.allOf(ch1, ch2, ch3).await(SYNC), yield *SYNCW();
+		} catch(e) {
+			thrown = true;
+		}
+		assert(f1, "Coroutine 1 finished at all");
+		assert(f2, "Coroutine 2 finished at all");
+		assert(f3, "Coroutine 3 finished at all");
+		assert(thrown, "Error was persistently thrown on second await");
+	},
+
+	"CRTK-SRC-G-5":
+	function *(log, assert) {
+		log("Test: anyOf cancels remaining if cancelAbandoned");
+		var f1 = false, f2 = false, f3 = false,
+			c1 = false, c2 = false, c3 = false;
+		var ch1 = start(function *() {
+				try {
+					setTimeout(SYNC, 100); yield *SYNCW();
+					f1 = true;
+				} catch (e) {
+					c1 = true;
+				}
+			}),
+			ch2 = start(function *() {
+				try {
+					setTimeout(SYNC, 250); yield *SYNCW();
+					f2 = true;
+				} catch (e) {
+					c2 = true;
+				}
+			}),
+			ch3 = start(function *() {
+				try {
+					setTimeout(SYNC, 500); yield *SYNCW();
+					f3 = true;
+				} catch (e) {
+					c3 = true;
+				}
+			});
+		Checkpoint.anyOf(ch1, ch2, ch3).cancelAbandoned(true)
+		.await(SYNC), yield *SYNCW();
+		assert(f1, "Coroutine 1 finished on anyOf");
+		assert(!f2, "Coroutine 2 not finished on anyOf");
+		assert(!f3, "Coroutine 3 not finished on anyOf");
+
+		Checkpoint.allOf(ch1, ch2, ch3).await(SYNCTL), yield *SYNCW();
+		assert(f1 && !c1, "Coroutine 1 finished at all, not canceled");
+		assert(!f2 && c2, "Coroutine 2 canceled in the end");
+		assert(!f3 && c3, "Coroutine 3 canceled in the end");
+	},
+
+	"CRTK-SRC-G-6":
+	function *(log, assert) {
+		log("Test: allOf cancels remaining if stopOnFirstError and cancelAbandoned");
+		var f1 = false, f2 = false, f3 = false,
+			c1 = false, c2 = false, c3 = false;
+		var ch1 = start(function *() {
+				try {
+					setTimeout(SYNC, 100); yield *SYNCW();
+					f1 = true;
+				} catch (e) {
+					c1 = true;
+				}
+				throw new Error("test error");
+			}),
+			ch2 = start(function *() {
+				try {
+					setTimeout(SYNC, 250); yield *SYNCW();
+					f2 = true;
+				} catch (e) {
+					c2 = true;
+				}
+			}),
+			ch3 = start(function *() {
+				try {
+					setTimeout(SYNC, 500); yield *SYNCW();
+					f3 = true;
+				} catch (e) {
+					c3 = true;
+				}
+			});
+		Checkpoint.allOf(ch1, ch2, ch3)
+		.stopOnFirstError(true)
+		.cancelAbandoned(true)
+		.await(SYNCTL), yield *SYNCW();
+		assert(f1, "Coroutine 1 finished on allOf");
+		assert(!f2, "Coroutine 2 not finished on allOf");
+		assert(!f3, "Coroutine 3 not finished on allOf");
+
+		Checkpoint.allOf(ch1, ch2, ch3).await(SYNCTL), yield *SYNCW();
+		assert(f1 && !c1, "Coroutine 1 finished at all, not canceled");
+		assert(!f2 && c2, "Coroutine 2 canceled in the end");
+		assert(!f3 && c3, "Coroutine 3 canceled in the end");
+	},
 };
 
 //
@@ -507,6 +736,10 @@ start(function *() {
 	console.log("---- Running tests... ----");
 	var testAwaitables = new Array();
 	for (let tcId in testCases) {
+		// specify a test case ID on command line to run only it
+		if (process.argv[2] && process.argv[2] != tcId) {
+			continue;
+		}
 		if (tcId[0] != '*') {
 			testResults[tcId] = false;
 			let log = function(...msgs) {
@@ -515,7 +748,10 @@ start(function *() {
 				},
 				assert = function(flag, description) {
 					if(!flag) {
+						log(`Assertion failed - ${description}`);
 						throw new Error(`Assertion failed - ${description}`);
+					} else {
+						log(`Assertion passed - ${description}`);
 					}
 				}
 			testAwaitables.push(start(function *() {
