@@ -1,6 +1,6 @@
 {
   "name": "crtk",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Yet another JS coroutine toolkit based on ES6 generators",
   "main": "index.js",
   "scripts": {
@@ -23,5 +23,8 @@
   "engines": {
     "iojs": ">= 1.0.0",
     "node": ">= 0.12.0"
+  },
+  "bin": {
+  	"crtk-run": "cli.js"
   }
 }

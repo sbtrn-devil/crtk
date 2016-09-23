@@ -796,13 +796,13 @@ function *digOrDie() {
 }
 ```
 
-### .errors: _Array or null_
+### .errors: _Array or undefined_
 
-Read-only. Is `null` until the checkpoint is `.done`, then is set to array that contains error values delivered by the `Awaitable`-s that have finished with errors. No guarantee on order of the errors is given, nor on the `Awaitable`-s they origin from. Use this property if order and origin of errors is not important, or if you are sure the error values contain custom tag information you need.
+Read-only. Is `undefined` until the checkpoint is `.done`, then is set to array that contains error values delivered by the `Awaitable`-s that have finished with errors. No guarantee on order of the errors is given, nor on the `Awaitable`-s they origin from. Use this property if order and origin of errors is not important, or if you are sure the error values contain custom tag information you need.
 
-### .results: _Array or null_
+### .results: _Array or undefined_
 
-Read-only. Is `null` until the checkpoint is `.done`, then is set to array that contains result values delivered by the `Awaitable`-s that have finished normally. No guarantee on order of the results is given, nor on the `Awaitable`-s they origin from, so considerations similar to `.errors` apply.
+Read-only. Is `undefined` until the checkpoint is `.done`, then is set to array that contains result values delivered by the `Awaitable`-s that have finished normally. No guarantee on order of the results is given, nor on the `Awaitable`-s they origin from, so considerations similar to `.errors` apply.
 
 ```js
 function *doStuff() {

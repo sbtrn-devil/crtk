@@ -1,3 +1,5 @@
+#!/usr/bin/env node
+
 const {
 	start,
 	startMethod,
@@ -778,3 +780,5 @@ start(function *() {
 		console.log(`${tcId}: ${testResults[tcId].stack || testResults[tcId]}`);
 	}
 });
+
+module.exports.test = "qq";

@@ -262,6 +262,10 @@ function *superiorCoroutine() {
 }
 ```
 
+## Command line runner
+
+Since 1.1.0 `crtk` comes with helper `crtk-run` that allows to run functions/generators exported from .js files as `crtk`-flavored coroutines directly from command line, which allows to save time when writing quick scripts that use asynchronous APIs. More info [here][link-docs-crtk-run].
+
 ## Further reading
 
 These were the basic use cases showing `crtk` principles and core features. But there is more to it, including coroutine cancellation, feedback events, and coroutine local variables. Check [API description][link-docs-api] for more detailed and systematic insight.
@@ -271,3 +275,4 @@ These were the basic use cases showing `crtk` principles and core features. But 
 [link-co]: https://npmjs.org/package/co
 [link-asyncblock]: https://www.npmjs.com/package/asyncblock
 [link-docs-api]: docs/api.md
+[link-docs-crtk-run]: docs/crtk-run.md
