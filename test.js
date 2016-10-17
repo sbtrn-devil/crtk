@@ -727,6 +727,15 @@ var testCases = {
 		assert(!f2 && c2, "Coroutine 2 canceled in the end");
 		assert(!f3 && c3, "Coroutine 3 canceled in the end");
 	},
+
+	"CRTK-ISSUES-1":
+	function *(log, assert) {
+		log("Test: Awaiter() returns object with valid Function prototype");
+		var aw = Awaiter();
+		aw.apply(null, [null, 15]);
+		var r = (aw.await(SYNC), yield *SYNCW());
+		assert(r==15, "Expected value delivered");
+	},
 };
 
 //

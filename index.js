@@ -328,7 +328,7 @@ const Awaiter = module.exports.Awaiter = function Awaiter() {
 	}
 
 	theAwaiter.__proto__ = {
-		__proto__: Awaiter.prototype,
+		__proto__: Awaiter.__proto__,
 		await: function(callback) {
 			if (!(callback instanceof Function)) {
 				throw new Error("Callback must be a function");
