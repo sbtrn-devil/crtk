@@ -5,9 +5,9 @@
 
 ## 'Awaitable': _interface_
 
-`'Awaitable'` interface represents an operation with a deferred result and provides interface for interested consumer(s) to access it when ready. Conceptual difference from a Promise is that `'Awaitable'` represents an already running operation, there can be multiple consumers to its result, and they can be subscribed at any moment - including when the operation has completed.
+`'Awaitable'` interface represents an operation with a deferred result and provides interface for interested consumer(s) to access the result when ready. Conceptual difference from a Promise is that `'Awaitable'` represents an already running operation, there can be multiple consumers to its result, and they can be subscribed at any moment - including after the operation has completed.
 
-An object compliant with `'Awaitable'` interface must provides the following fields and meet following requirements:
+An object compliant with `'Awaitable'` interface must provide the following fields and meet the following requirements:
 
 ### .await(callback): _method_
 
@@ -29,7 +29,7 @@ Sets to `true` just before a notification callback is called, therefore is alway
 
 `'Cancellable'` represents an `'Awaitable'` operation that can be canceled. Meaning, agenda and consequences of cancellation are up to particular implementor.
 
-An object compliant with `'Cancellable'` interface must provides the following fields and meet following requirements:
+An object compliant with `'Cancellable'` interface must provide the following fields and meet the following requirements:
 
 ### .cancel([cancelMsg]): _method_
 
@@ -47,10 +47,11 @@ Cancel request may come with an attached cancellation message, specified by the 
 
 - `mainFunction`: _generator_ or _function_ - the coroutine main function
 - `args`: list of _any_ - arguments to pass to the coroutine main function
+- return: handle of the started coroutine
 
 The function starts a coroutine that executes given function.
 
-In most cases you want to pass a generator for `mainFunction` to pass a generator for function, as you can use yield in meaning of "wait for asynchronous result" (see `SYNC`/`SYNCTL` and `SYNCW`). However, usual function is allowed too. The logic of coroutine framework will be the same in either case, the code of a plain function will just be not able to leverage yielding.
+In most cases you want to pass a generator for `mainFunction`, as you can use `yield` operator in meaning of "wait for asynchronous result" (see `SYNC`/`SYNCTL` and `SYNCW`). However, usual function is allowed too. The logic of coroutine framework will be the same in either case, the code of a plain function will just be not able to leverage yielding.
 
 ```js
 const start = require("crtk");
@@ -96,9 +97,9 @@ start(sleep, 1000);
 
 `this` context in which the coroutine function is invoked should be assumed undefined. \[Currently it is global object, but this assumption must not be relied on.\] If you need to start a coroutine as a method of some object, you use `beginMethod` helper (see below).
 
-`start` returns a coroutine handle, object that allows to control and synchronize on the coroutine. See `'CoroutineHandle'` for more info.
+`start` returns a coroutine handle, object that allows to control and synchronize on the coroutine. See `'CoroutineHandle'` for more info. Coroutine code will start actual execution on next soonest asynchronous occasion.
 
-Coroutine code will start actual execution on next soonest asynchronous occasion. Note that, from coroutine perspective, pending asynchronous calls (including code from other coroutines) can be called during `yield *SYNCW()` statement.
+Note that, from coroutine perspective, any pending asynchronous code (including code from other coroutines) is only "allowed" to run during `yield *SYNCW()` statements.
 
 ## startMethod: _Symbol_
 
@@ -112,6 +113,7 @@ const startMethod = require("crtk").startMethod;
 
 - `methodId`: _string_ or _Symbol_ - id of the method
 - `args`: list of _any_ - parameters to pass to the method
+- return: handle of the started coroutine
 
 You use `beginMethod` on an object to start a method as a coroutine this way:
 
@@ -156,7 +158,7 @@ start(fancyFunction); // ok
 fancyFunction().next(); // CRASH BOOM DISASTER
 ```
 
-- They are accessible and refer to the same coroutine not just in coroutine main function, but as well in nested calls to functions and coroutine generators (via `yield *`).
+- They are accessible and refer to the same coroutine not just in the coroutine's main function, but as well in nested calls to functions and `yield *`-s to nested coroutine generators.
 
 ```js
 function *base1() {
@@ -189,7 +191,7 @@ function *coroutine() {
 }
 ```
 
-On a good side, programming with `crtk` allows to get rid of many callbacks in your code.
+On a good side, programming with `crtk` allows to deliver you from writing many direct callbacks in your code, so it won't be an issue for the most part.
 
 ### SYNC: _function(err, result)_
 
@@ -200,7 +202,7 @@ function calculateMe(x, callback) {
   setTimeout(function() {
     if (x == 0) { callback(new Error()); }
     else { callback(x + 1); }
-  }
+  }, 100);
 }
 
 function *test() {
@@ -214,7 +216,7 @@ function *test() {
 ```
 
 Several advanced points you generally don't need to keep in mind, but knowing them can be useful:
-- Invocation of `SYNC` has no immediate synchronous effect down its caller's stack, resumption of coroutine code will occur asynchronously. Therefore `crtk` backs you up in cases like this:
+- Invocation of callback generated by `SYNC` has no immediate synchronous effect down its caller's stack, resumption of coroutine code will occur asynchronously. Therefore `crtk` backs you up in cases like this:
 
 ```js
 var flakyService = {
@@ -236,14 +238,14 @@ var flakyService = {
 function *niftyCoroutine() {
   flakyService.begin(SYNC), yield *SYNCW();
   flakyService.begin(SYNC), yield *SYNCW();
-  // ^you would get an error... luckily, you won't and everything will work
-  // as you would expect
+  // ^you would get an error on the 2nd one...
+  // luckily, you won't and everything will work as you would expect
 }
 ```
 
 - `SYNC` is a one-shot callback. _The same_ callback instance only does the intended action once, all subsequent calls to it are no-ops.
-- After `yield *SYNCW()` is executed the `SYNC` starts referring to _new_ callback instance. Due to previous point, invocation of old callback will not cause coroutine resumption on the new `yield *SYNCW()`, so it is safe from this side.
-- `SYNC` can be invoked without yielding the coroutine. In this case next `yield *SYNCW()` will deliver the provided values immediately:
+- After `yield *SYNCW()` is executed the `SYNC` starts referring to _new_ callback instance. Due to previous point, invocation of old callback will not cause coroutine resumption after the new `yield *SYNCW()`, so it is safe from this side.
+- `SYNC` can be invoked without yielding the coroutine. In this case next `yield *SYNCW()` will deliver the provided error/value immediately:
 
 ```js
 function *doATrick() {
@@ -271,7 +273,7 @@ function beginFlakyLoad(url, callback) {
 }
 ```
 
-In practice, all these points mean that `crtk`'s `SYNC`/`yield *SYNCW()` flow is protected against typical callback usage errors _from asynchronous service side_: double-trigger, invocation in intermediate service state, and synchronous invocation. So, when using `crtk`, a bunch of possibilities for control flow bugs due to flaky implementation of 3rd party libraries is eliminated in transparent manner.
+In practice, all these points mean that `crtk`'s `SYNC`/`yield *SYNCW()` flow is protected against typical callback usage errors _from asynchronous service side_: double-trigger, invocation in intermediate service state, and occasional synchronous invocation (i. e. having cases where it is called before the asynchronous starter function returns). So, when using `crtk`, a bunch of possibilities for control flow bugs due to flaky implementation of 3rd party libraries is eliminated in transparent manner.
 
 ### SYNCTL: _function(result)_
 
@@ -298,7 +300,7 @@ All points and details described above for `SYNC` are also applicable to `SYNCTL
 
 This pseudo-global resolves to a helper generator. As mentioned above, expression `yield *SYNCW()` yields the coroutine execution and resumes it when callback obtained by preceding `SYNC` or `SYNCTL` is called.
 
-This strategy holds in almost all cases, except for one forced exception (fortunately quite an exotic one) that you have to remember: _do not use SYNC/SYNCTL under real generators_.
+This strategy holds in almost all cases, except for one forced exception (fortunately quite an exotic one) that you have to remember: _do not use SYNC/SYNCTL under real generators_ (ones that are used as actual generators).
 
 ```js
 // NO
@@ -310,7 +312,7 @@ function *getNextValue() {
 // DON'T
 function *generator() {
   for(var i = 0; i < 100; i++) {
-    yield (yield *getNextValue()); // even looks incorrect!
+    yield (yield *getNextValue()); // it even looks incorrect!
   }
 }
 
@@ -324,7 +326,7 @@ function *main() {
 
 Because `crtk`'s coroutine framework is implemented on generators, such unnatural restriction unfortunately applies. If you ever need such a strange construct, you'll need to wrap the generator or express the logic without generators.
 
-Another possible outcome for `yield *SYNCW()` is to throw `Cancellation` object if the coroutine is canceled (see `'CoroutineHandle'.cancel`). For case of asynchronous operation you are waiting on provides some explicit cancel facility, `SYNCW` accepts an optional `cancelCallback` parameter. It can be a function of `(cancelMsg)` signature, and it is invoked before throwing `Cancellation`, allowing you to perform some custom cancellation code.
+Another possible outcome for `yield *SYNCW()` is to throw `Cancellation` object if the coroutine is canceled (see `'CoroutineHandle'.cancel`). For case when asynchronous operation you are waiting on provides some explicit cancel facility, `SYNCW` accepts an optional `cancelCallback` parameter. It can be a function of `(cancelMsg)` signature, and it is invoked before throwing `Cancellation`, allowing you to perform some custom cancellation code.
 
 ```js
 function *cancelAware() {
@@ -339,7 +341,9 @@ function *cancelAware() {
 }
 ```
 
-`cancelCallback` won't be called if the cancel does not occur during this `yield *SYNCW()`. But, if it is called, `cancelMsg` parameter is the cancellation message value provided by caller of `'CoroutineHandle'.cancel`.
+The `cancelMsg` parameter is the cancellation message value provided by caller of `'CoroutineHandle'.cancel`.
+
+`cancelCallback` will only be called if the cancel occurs during this particular  `yield *SYNCW()`.
 
 #### .withCancel(cancelCallback): _generator_
 
@@ -434,7 +438,7 @@ This field is defined and set to non-false value if coroutine's starting functio
 
 This field is defined if coroutine's starting function has ended with normal return, and is set to its returned value. Only has meaning if `.error` is non-true.
 
-`'CoroutineHandle'`'s `.error` and `.result` are treated as result of the `'Awaitable'` implemented by the coroutine.
+`'CoroutineHandle'`'s `.error` and `.result` are treated as result of the `'Awaitable'` implemented by the handle.
 
 ```js
 function *failousCrtn() {
@@ -462,7 +466,7 @@ Requests the coroutine to cancel. The cancel is enforced by making all subsequen
 
 Throwing semantics allows the coroutine to finalize its cancellation gracefully in natural exception unwinding way.
 
-Remember that no more awaiting for asynchronous operations are allowed in the coroutine after cancellation. If your finalization logic needs ones you have to start that logic in a new coroutine.
+Remember that no more awaiting for asynchronous operations are allowed in the coroutine after cancellation. If your finalization logic needs ones then you have to start that logic in a new coroutine.
 
 ### .emit(channel, ...args): _method_
 
@@ -481,11 +485,11 @@ function *longOperationWithProgressReport() {
 }
 ```
 
-There can be listener callbacks subscribed on this channel (see `.on` and `.once`), every time the event is emitted on this channel they are invoked (on next soonest asynchronous occasion). Unlike with `Awaitable`-s, the events are not persistent: if a listener was not subscribed by time the event is emitted, it won't get it.
+To ease differing events from each other, each event is associated with a certain "event channel" identified by some string (the channel ID). There can be listener callbacks subscribed on this channel (see `.on` and `.once`), and every time the event is emitted on this channel they are invoked (on next soonest asynchronous occasion). Unlike with `Awaitable`-s, the events are not persistent: if a listener was not subscribed by time the event is emitted, it won't get it.
 
 No order of calling the listeners is guaranteed, so don't rely on any assumption of their ordering.
 
-Emitting events is not restricted to any coroutine state, it is allowed even when coroutine is cancelled, completed, or its code has not yet been executed (of course in latter two cases the emission is possible only by external helpers). You can actually create a dummy coroutine that does nothing by itself, just to have a free event producer:
+Emitting events is not restricted to any coroutine state, it is allowed even when coroutine is cancelled, completed, or its code has not yet been executed (of course in latter two cases the emission is only possible by external helpers from outside the coroutine code). You can actually create a dummy coroutine that does nothing by itself, just to have a free event producer:
 
 ```js
 function Clickable() {
@@ -498,10 +502,12 @@ function Clickable() {
   this.addOnClickListener = function(callback) {
     eventProducer.on("click", callback);
   };
+
+  return eventProducer;
 }
 ```
 
-Channel IDs do not need to be specially and separately declared, you just use any string you like. Of course one that doesn't conflict with ones already in use. `crtk` by itself reserves no channel IDs, so you are free to start from any one.
+Channel IDs do not need to be specially and separately declared, you just use any string you like. Of course it shouldn't conflict with ones already in use. `crtk` by itself reserves no channel IDs, so you are free to start from any one.
 
 ### .on(channel, callback): _method_
 
@@ -521,9 +527,9 @@ start(pinger).on("ping", function (arg) {
 });
 ```
 
-`this` context of callback should be assumed undefined. \[Currently it is global object, but this assumption must not be relied on.\] If you need a method, use binding.
+`this` context of callback should be assumed undefined (in sense that we can't rely on it assigned any particular value). \[Currently it is global object, but this assumption must not be relied on.\] If you need to call a method, use binding.
 
-Unlike most similar event solutions, `crtk` framework does not pass any extra parameters to handlers to access some sort of the 'event' object. The parameters set given by an emitter will be provided as is. Similarly, no event bubbling, suppression etc. - just straightforward call of all the listeners. Because simplicity. If needed, this feature can be used as basis for manual implementation of more sophisticated event handling. But if you need no sophistication, it is good as is.
+Unlike most similar event solutions, `crtk` framework does not pass any extra parameters to handlers to access some sort of the 'event' object. The list of parameters given by an emitter will be passed as is. Similarly, no event bubbling, suppression etc. - just straightforward call of all the listeners. Because simplicity. If needed, this feature can be used as basis for implementing custom, more sophisticated event handling. But if you need no sophistication, it is good as is.
 
 _NOTE_: same subscriber instance can not be subscribed twice, on such attempts second subscription is silently ignored. However, as always in similar cases in JS, be careful when using bound, anonymous or local functions: never forget that a `.bind(...)` or `function(){...}` delivers _new_ instance every time it is calculated, and local function is different on each new call of enclosing function.
 
@@ -532,7 +538,7 @@ _NOTE_: same subscriber instance can not be subscribed twice, on such attempts s
 - `channel`: _String_ - channel ID
 - `callback`: _function_ - listener callback to be called
 
-Same as `.on(channel, callback)`, but the `callback` will only be called once, for next soonest event on `channel`, and then auto-unsubscribed. Handy when you need exactly this behaviour.
+Same as `.on(channel, callback)`, but the `callback` will only be called once, for next soonest event on `channel`, and then auto-unsubscribed. Handy when you need it to behave exactly like this, and particularly useful with anonymous/local/bound functions as one-shot callbacks.
 
 ### .removeListener(channel, callback): _method_
 
@@ -584,9 +590,9 @@ function *test() {
 }
 ```
 
-Manual construction and throwing of `Cancellation` is not recommended, in order to ensure consistent 'catching `Cancellation` means that current coroutine is canceled' convention. For the same reason, if you are `.await`-ing on a coroutine that ends by throwing `Cancellation`, a wrapper `Error` is thrown into the awaiter's flow instead of the original `Cancellation`: the awaited coroutine canceled is abnormal result, but it isn't cancellation of the awaiter. However, the original `Cancellation` will still be accessible via `'CoroutineHandle'.error` (and this is the only allowed case for its `.error` to be different from value delivered to `.await`-ing callbacks).
+Manual construction and throwing of `Cancellation` is not recommended, in order to ensure consistent 'catching `Cancellation` means that current coroutine is canceled' convention. For the same reason, if you are `.await`-ing on a coroutine that ends by throwing `Cancellation`, a wrapper `Error` is thrown into the awaiter's flow instead of the original `Cancellation`: unhandled cancellation of the awaited coroutine is abnormal result, but it isn't cancellation of the awaiter. However, the original `Cancellation` will still be accessible via `'CoroutineHandle'.error` (and this is the only allowed case for its `.error` to be different from value delivered to `.await`-ing callbacks).
 
-Note: if your coroutine catches `Cancellation`, then won't rethrow it and finish gracefully without attempting `yield *SYNCW()`-s, it will be considered a normal return.
+Note: if your coroutine catches `Cancellation`, then won't rethrow it and will finish gracefully without attempting any more `yield *SYNCW()`-s, it will be considered a normal return.
 
 ### .message: _any_
 
@@ -594,7 +600,7 @@ Cancellation message. The same value as provided in `cancelMsg` parameter to `'C
 
 ### .stack: _String_
 
-Stack trace of the `yield *SYNCW()` that issues the `Cancellation`. Note that any subsequent `yield *SYNCW()` in the same coroutine throws new `Cancellation` instance with new stack trace.
+Stack trace of the `yield *SYNCW()` that issued the `Cancellation`. Note that any subsequent `yield *SYNCW()` in the same coroutine throws new `Cancellation` instance with new stack trace, the old instance is discarded (unless you store it manually somewhere).
 
 ### .toString(): _String_ (as per `Object`)
 
@@ -611,17 +617,17 @@ const {
   Awaiter
 } = require("crtk");
 
-// note that construction of an Awaiter is without 'new'
+// note that construction of an Awaiter is STRICTLY without 'new'
 var awaiter = Awaiter();
 ```
 
 ### (err, result): _function_
 
-`Awaiter` is a function that can be just called. Its signature is usual `(err, result)` where non-false `err` means an error, and `result` means normal result. This result will be delivered further via `.await`.
+`Awaiter` is a function that can be just called. Its signature is usual `(err, result)` where non-false `err` means an error, and `result` means normal result. This result will be delivered further to `.await`-ers.
 
 As well as `SYNC`/`SYNCTL`, `Awaiter` is one-shot function (subsequent calls are no-ops) and has no immediate side effects.
 
-Typical use is like this:
+Typical use case is like this:
 
 ```js
 const unirest = require("unirest"); // https://www.npmjs.com/package/unirest
@@ -660,9 +666,11 @@ A checkpoint is synchronization tool to address problems like "wait until all of
 ### .allOf(...awaitables): _function: 'CheckpointInstance'_
 
 - `awaitables`: list of _Awaitable_ or _Array_
+- return: handle of the created checkpoint instance
 
-"Static" method that creates and returns a `'CheckpointInstance'` object (see below) configured to wait until _all_ of the provided awaitables finish. Each element of `awaitables` must be either an `Awaitable` or an array, where each instance is either an `Awaitable` or an array... etc.
-In order for `'CheckpointInstance'` to be a consistent `Awaitable`, the set of awaitables checkpoint waits on is fixed on creation and can't be changed later.
+"Static" method that creates and returns a `'CheckpointInstance'` object (see below) configured to wait until _all_ of the provided awaitables finish. Each element of `awaitables` must be either an `Awaitable` or an array, where each element is either an `Awaitable` or an array, where each element is... etc.
+
+In order for `'CheckpointInstance'` to be a consistent `Awaitable`, the set of awaitables the checkpoint waits on is fixed on creation and can't be changed later.
 
 ```js
 function *test() {
@@ -691,6 +699,7 @@ If no awaitables are provided, the checkpoint is considered finished right away.
 ### .anyOf(...awaitables): _function: 'CheckpointInstance'_
 
 - `awaitables`: list of _Awaitable_ or _Array_
+- return: handle of the created checkpoint instance
 
 "Static" method that returns a `'CheckpointInstance'` object configured to wait until _any one_ of the provided awaitables finish. All the other considerations are the same as for `.allOf`.
 
@@ -713,7 +722,7 @@ function *doItWithTimeout(x) {
 
 If no awaitables are provided, the checkpoint is considered finished right away.
 
-Note that if checkpoint finishes before all of its `Awaitable`-s finish, its results are sealed, and activity and outcomes of remaining `Awaitable`-s are ignored. This strategy holds for all cases of early finish, including "stop on first error" mode (see `'CheckpointInstance'.stopOnFirstError`).
+Note that if checkpoint finishes before all of its `Awaitable`-s finish, its results are sealed, and activity and outcomes of remaining `Awaitable`-s can no longer affect it. This strategy holds for all cases of early finish, including "stop on first error" mode (see `'CheckpointInstance'.stopOnFirstError`).
 
 ## 'CheckpointInstance': _class_
 
@@ -727,7 +736,7 @@ The "handle" to actual instance of the checkpoint. Exposes waiting operations an
 - `callback`: _function(err, result)_ - result notification callback
 
 Await for the configured condition (`allOf` or `anyOf`).
-Result of the checkpoint is an instance of `CheckpointResult` (see below). If an error occurs, it is delivered as an error, otherwise as a normal result.
+Result of the checkpoint is an instance of `CheckpointResult` (see below). If an error occurs, `CheckpointResult` is delivered as an error, otherwise as a normal result.
 
 ```js
 function *test() {
@@ -771,9 +780,9 @@ function *failingOneMakesWaitingForOthersMeaningless() {
 - `yes`: _Boolean_ - true if checkpoint must cancel abandoned awaitables on early finish, default is `false`
 - return: the subject `'CheckpointInstance'`, use for chaining calls
 
-On early finish (in `.anyOf` mode or to error of an `Awaitable` in `.stopOnFirstError` mode), the remaining unfinished `Awaitable`-s are abandoned and normally are left to proceed to no effect on the checkpoint. But just leaving them running may not be always desirable. You can enable "cancel abandoned" mode to force automatic cancel if early finish is encountered.
+On early finish (in `.anyOf` mode or to error of an `Awaitable` in `.stopOnFirstError` mode), the remaining unfinished `Awaitable`-s are abandoned and normally are left to proceed, though with no effect on the checkpoint. But just leaving them running may not be always desirable. You can enable "cancel abandoned" mode to force automatic cancel if early finish is encountered.
 
-An alternative to using `.cancelAbandoned` is to use manual `.cancel` on a finished checkpoint.
+Equivalent to using `.cancelAbandoned` is to use manual `.cancel` on a finished checkpoint.
 
 ```js
 function *digOrDie() {
@@ -792,7 +801,7 @@ function *digOrDie() {
   // the same as above, but cancel manually
   var checkpoint = Checkpoint.anyOf(start(diggerThree), start(diggerFour))
   .await(SYNC), yield *SYNCW();
-  checkpoint.cancel();
+  checkpoint.cancel(); // but here we needed a var to store the instance
 }
 ```
 
@@ -868,5 +877,7 @@ Array of results. The same as `.results` of the subject `'CheckpointInstance'` w
 Stack trace of throwing the `CheckpointResult`. Is only defined if `CheckpointResult` was thrown.
 
 ### .toString(): _method: String_
+
+- return: stringified value of the object
 
 Returns stringification of `CheckpointResult` (message of form "CheckpointResult: errors = [...], successes = [...]").
