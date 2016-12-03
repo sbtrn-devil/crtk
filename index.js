@@ -102,6 +102,9 @@ function start(gFunc, ...theArgs) {
 				awaiters.add(callback);
 			}
 		},
+		unawait: function unawait(callback) {
+			thisCrtn[$awaiters] && thisCrtn[$awaiters].delete(callback);
+		},
 		cancel: function cancel(cancelMsg) {
 			if (!thisCrtn[$cancelled]) {
 				thisCrtn[$cancelled] = true;
@@ -314,7 +317,7 @@ const Awaiter = module.exports.Awaiter = function Awaiter() {
 		throw new Error("Use Awaiter(), not new Awaiter()");
 	}
 
-	var awaiters = new Set(),done = false, e, r;
+	var awaiters = new Set(), done = false, e, r;
 	function theAwaiter(err, result) {
 		if (!done) {
 			done = true;
@@ -329,7 +332,7 @@ const Awaiter = module.exports.Awaiter = function Awaiter() {
 
 	theAwaiter.__proto__ = {
 		__proto__: Awaiter.__proto__,
-		await: function(callback) {
+		await: function await(callback) {
 			if (!(callback instanceof Function)) {
 				throw new Error("Callback must be a function");
 			}
@@ -340,6 +343,10 @@ const Awaiter = module.exports.Awaiter = function Awaiter() {
 				// add to queue
 				awaiters.add(callback);
 			}
+		},
+
+		unawait: function unawait(callback) {
+			awaiters && awaiters.delete(callback);
 		},
 
 		get done() {
@@ -409,41 +416,62 @@ function checkpointCreate(arrayOfAwaiters, waitUpTo) {
 		}
 	};
 
-	var canceled = false;
+	var canceled = false, callback = null, unawaitAwaiters = null;
 	if (waitUpTo <= 0) {
 		// nothing to wait, trigger at once
 		finalAwaiter(null, new CheckpointResult(errors, results));
 	} else {
-		for (var awaiter of arrayOfAwaiters) {
-			awaiter.await(function(err, result) {
-				if (!done) {
-					if (err) { errors.push(err); }
-					else { results.push(result); }
-					if (++completedSoFar >= waitUpTo ||
-						(err && stopOn1stError)) {
-						done = true;
-						var haveErrors = errors.length > 0,
-							finalResult = new CheckpointResult(errors, results);
-						// depending on whether the total is success or an error,
-						// return or throw
-						finalAwaiter(haveErrors ? finalResult : null,
-							haveErrors ? null : finalResult);
-						if (mustCancelAbandoned && !canceled) {
-							canceled = true; // considering this a cancel
-							for (var awaiter of arrayOfAwaiters) {
-								if (!awaiter.done) {
-									typeof(awaiter.cancel) == "function" &&
-									awaiter.cancel(cancelMsg);
-								}
-							}
+		var unawaited = false;
+		unawaitAwaiters = function unawaitAwaiters() {
+			// cancel awaiting on awaiters that are no longer needed
+			if (!unawaited && arrayOfAwaiters && callback) {
+				unawaited = true;
+				for (var awaiter of arrayOfAwaiters) {
+					try {
+						if (!awaiter.done) {
+							typeof(awaiter.unawait) == "function" && awaiter.unawait(callback);
 						}
-						if (completedSoFar >= arrayOfAwaiters.length) {
-							// no longer use in the list, it can be disposed
-							arrayOfAwaiters = null;
-						}
+					} catch (e) {
+						// we can't help if unawait throws anything, but its
+						// problems must not subvert the checkpoint convention
 					}
 				}
-			});
+			}
+		};
+
+		callback = function checkpointCallback(err, result) {
+			if (!done) {
+				if (err) { errors.push(err); }
+				else { results.push(result); }
+				if (++completedSoFar >= waitUpTo ||
+					(err && stopOn1stError)) {
+					done = true;
+					var haveErrors = errors.length > 0,
+						finalResult = new CheckpointResult(errors, results);
+					// depending on whether the total is success or an error,
+					// return or throw
+					finalAwaiter(haveErrors ? finalResult : null,
+						haveErrors ? null : finalResult);
+					unawaitAwaiters(); // no need to listen the rest
+					if (mustCancelAbandoned && !canceled) {
+						canceled = true; // considering this a cancel
+						for (var awaiter of arrayOfAwaiters) {
+							if (!awaiter.done) {
+								typeof(awaiter.cancel) == "function" &&
+								awaiter.cancel(cancelMsg);
+							}
+						}
+					}
+					if (completedSoFar >= arrayOfAwaiters.length) {
+						// no longer use in the list, it can be disposed
+						arrayOfAwaiters = null;
+					}
+				}
+			}
+		};
+
+		for (var awaiter of arrayOfAwaiters) {
+			awaiter.await(callback);
 		}
 	}
 
@@ -459,6 +487,7 @@ function checkpointCreate(arrayOfAwaiters, waitUpTo) {
 			return me;
 		},
 		await: finalAwaiter.await.bind(finalAwaiter),
+		unawait: finalAwaiter.unawait.bind(finalAwaiter),
 		cancel: function cancel(msg) {
 			if (!canceled) {
 				canceled = true;

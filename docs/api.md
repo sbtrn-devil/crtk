@@ -17,6 +17,20 @@ Subscribe a consumer to await the operation result. Result will be delivered by 
 
 There can be multiple subscribers awaiting, and it is legal to call `.await` at any time. `'Awaitable'` compliance requires that invocation of any `.await`-ing callback is guaranteed (any exactly once) after the result is available, regardless on whether they were subscriber before or after actual completion. In the latter case a callback will be called on next soonest asynchronous occasion.
 
+If there are multiple callbacks, order of callbacks invocation is unspecified and is up to the implementor.
+
+Subscribing same instance of `callback` to the same `'Awaitable'` is not encouraged and should be considered an undefined behaviour.
+
+### [optional] .unawait(callback): _method_
+
+- `callback`: _function(err, result)_ - result notification callback
+
+`'Awaitable'` may, and is highly recommended to, implement `.unawait` method that removes the given `callback` from the result notification list. If should prevent the callback from being called if invoked before the `'Awaitable'` is done.
+
+If `callback` is not on the list, the method must do nothing.
+
+All `crtk` built-in `'Awaitable'` implementations implement the `.unawait`.
+
 ### .done: _Boolean_
 
 Read-only property that is `false` when an operation is still running or `true` when it has completed and the result available.
@@ -723,6 +737,8 @@ function *doItWithTimeout(x) {
 If no awaitables are provided, the checkpoint is considered finished right away.
 
 Note that if checkpoint finishes before all of its `Awaitable`-s finish, its results are sealed, and activity and outcomes of remaining `Awaitable`-s can no longer affect it. This strategy holds for all cases of early finish, including "stop on first error" mode (see `'CheckpointInstance'.stopOnFirstError`).
+
+`.anyOf` checkpoint type makes use of `'Awaitable'.unawait` methods (where awailable) to clean up its internal callbacks from `'Awaitable'`-s that ended up unused.
 
 ## 'CheckpointInstance': _class_
 

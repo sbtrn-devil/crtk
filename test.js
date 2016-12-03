@@ -728,14 +728,44 @@ var testCases = {
 		assert(!f3 && c3, "Coroutine 3 canceled in the end");
 	},
 
+	//
+	// issues
+	//
+
 	"CRTK-ISSUES-1":
 	function *(log, assert) {
 		log("Test: Awaiter() returns object with valid Function prototype");
 		var aw = Awaiter();
 		aw.apply(null, [null, 15]);
 		var r = (aw.await(SYNC), yield *SYNCW());
-		assert(r==15, "Expected value delivered");
+		assert(r == 15, "Expected value delivered");
 	},
+
+	"CRTK-ISSUES-2":
+	function *(log, assert) {
+		log("Test: Checkpoint.anyOf unawaits the unused Awaitables");
+		var awRaw = Awaiter(), callbacks = new Set();
+		var aw = {
+			await: function await(callback) {
+				callbacks.add(callback);
+				return awRaw.await(callback);
+			},
+			unawait: function unawait(callback) {
+				callbacks.delete(callback);
+				return awRaw.unawait(callback);
+			},
+			get done() {
+				return awRaw.done;
+			}
+		};
+
+		for (var i = 0; i < 10; i++) {
+			Checkpoint.anyOf(aw, start(function *() {
+				setTimeout(SYNC, 100), yield *SYNCW();
+			})).await(SYNC), yield *SYNCW();
+		}
+		assert(callbacks.size == 0, "Unawait was applied to unused Awaitable-s");
+	}
 };
 
 //

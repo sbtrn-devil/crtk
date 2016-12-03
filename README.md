@@ -16,6 +16,12 @@ A number of libraries around try to provide a coroutine framework around generat
 - Minimize intrusiveness. You do not need to "promisify" existing 3rd party interfaces or make fat wrappers just to adopt them to coding model `crtk` offers: in most cases a problem is solved inline.
 - Cooperative multitasking. `crtk` keeps in mind that multiple coroutines may need to cooperate and synchronize, as well with each other as with "plain old async code", and provides appropriate tools.
 
+## Installation
+
+```
+npm install crtk
+```
+
 ## Usage overview
 
 Assume we have an async operation that reports its result in plain old node.js way, via callback to `function(err, result)`, where non-false `err` means an error, otherwise `result` contains the result:
