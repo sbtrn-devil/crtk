@@ -1,6 +1,6 @@
 {
   "name": "crtk",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Yet another JS coroutine toolkit based on ES6 generators",
   "main": "index.js",
   "scripts": {
