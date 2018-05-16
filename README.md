@@ -1,20 +1,38 @@
+[![coverage-98%](https://img.shields.io/badge/coverage-98%25-brightgreen.svg?style=flat)](coverage/lcov-report/index.html)
+
 # crtk
 
 `crtk` is yet another JavaScript CoRoutine ToolKit based on ES6 generators, which allows you to write asynchronous code in human readable and writeable way, and provides tools for coroutines synchronization and cooperation.
 
-Because `crtk` relies on ES6 features (namely: generators, spreading, `Map`, `Set`, `Symbol`), and its design encourages client code to use ES6 compliant generators, it requires ES6 capable engine (node >=0.12.0 with --harmony, iojs >=1.0.0, or, if you browserify, a modern version of browser like Firefox/Chrome/Chromium based).
+Because `crtk` relies on ES6 features (namely: generators, spreading, `Map`, `Set`, `Symbol`), and its design encourages client code to use ES6 compliant generators, it requires ES6 capable engine (node 6 with --harmony, node >=7, or, if you browserify, a modern version of browser like Firefox/Chrome/Chromium based).
+
+Starting from 1.3, `crtk` takes native ES `Promise` into its orbit, so that users of node 7+ can benefit from both ES2017+ `async` / `await` and `crtk` facilities.
 
 ## Why another one?
 
 Callback oriented programming of asynchronous flow is bad. Programming it with coroutines is [good][link-coroutines]. The problem is that up until recently JS provided no accessible ways to write coroutine style code. Introduction of [generators][link-generators] is a large step forward, unfortunately the feature was designed with different goals in mind and is not conditioned for the task out of the box.
 
-A number of libraries around try to provide a coroutine framework around generators. Most notable one is [`co`][link-co]. Unfortunately it is impractical as it is centered around Promises (which have quite an ugly and unhandy design). Most of `co` counterparts suffer the same drawback. Better approach is offered in [`asyncblock`][link-asyncblock], but it feels somewhat awkward and unnecessarily overcomplicated.
+A number of libraries around try to provide a coroutine framework around generators. Most notable one is [`co`][link-co]. Unfortunately it is impractical as it is centered around `Promise`-s (which have quite an ugly and unhandy design). Most of `co` counterparts suffer the same drawback. Better approach is offered in [`asyncblock`][link-asyncblock], but it feels somewhat awkward and unnecessarily overcomplicated.
+
+### We already have node 7+ and async/await, we don't care!
+
+Ok, write an async function that waits for 250 ms using setTimeout.
+
+```js
+async function justWait() {
+  setTimeout // ...
+  // but... node 7+... async...
+}
+```
+
+With advent of ES2017, latest major versions of node support `async` / `await`, which sweeps most of `Promise` atrocities under the carpet and allows easy coroutine coding based on native ES `Promise`-s. Unfortunately its interface to callback driven world is still far from having a human face, so the problem is still on the table.
 
 `crtk` tries to address the issues:
 
 - Minimize wrapping code. Express the asynchronous flow not just in "synchronous" styled code, but in the code that looks as natural as possible, does exactly what it reads, and does not require a reading eye to stumble on sophisticated constructs.
 - Minimize intrusiveness. You do not need to "promisify" existing 3rd party interfaces or make fat wrappers just to adopt them to coding model `crtk` offers: in most cases a problem is solved inline.
 - Cooperative multitasking. `crtk` keeps in mind that multiple coroutines may need to cooperate and synchronize, as well with each other as with "plain old async code", and provides appropriate tools.
+- Bringing it all together. Starting from 1.3, `crtk` attempts to provide as seamless interface between callback-driven APIs, `async`/`await` (if using node 7+), and its own generator based coroutines as possible. Promisification must die!
 
 ## Installation
 
@@ -22,9 +40,16 @@ A number of libraries around try to provide a coroutine framework around generat
 npm install crtk
 ```
 
+or globally:
+
+```
+npm install crtk -g
+```
+
+
 ## Usage overview
 
-Assume we have an async operation that reports its result in plain old node.js way, via callback to `function(err, result)`, where non-false `err` means an error, otherwise `result` contains the result:
+Assume we have an async operation that reports its result in plain old node way, via callback to `function(err, result)`, where non-false `err` means an error, otherwise `result` contains the result:
 
 ```js
 function calculateValuableFunction(x, callback) {
@@ -268,9 +293,67 @@ function *superiorCoroutine() {
 }
 ```
 
+### So, what's about node 7+ and async/await?
+
+Remember the example from introduction? `crtk` (1.3.0+) can help you with that:
+
+```js
+const {
+  start,
+  NowThen
+} = require("crtk");
+
+async function justWait() {
+  var nt = NowThen();
+  await(setTimeout(nt.SYNC, 250), nt.SYNCW);
+  // which is in line with the main crtk pattern you could see above
+}
+
+// and use!
+var justWaitAsPromise = justWait();
+justWaitAsPromise.then(...);
+var justWaitAsCoroutine = start(justWait); // you can do this way too
+justWaitAsCoroutine.await(...);
+```
+
+In addition, coroutine handles, `Awaiter`-s and `Checkpoint`-s are also `Promise`-like objects, so you can `await` them too.
+
+```js
+async function meIsAsync() {
+  var crtn = start(function *meIsAsyncToo() {
+    setTimeout(SYNC, 250), yield *SYNCW();
+    return 101;
+  });
+
+  var result = await crtn; // yes, result == 101
+}
+```
+
+Finally, `crtk` upgrades ES native `Promise` prototype, so that `async` function is now a valid `crtk` awaitable object.
+
+```js
+function *anotherCoroutine() {
+  async function anotherAsyncFunction() {
+    return 42;
+  }
+
+  var result = (anotherAsyncFunction().await(SYNC), yield *SYNCW()); // 42
+
+  // or in a checkpoint
+  Checkpoint.allOf(
+    anotherAsyncFunction(),
+    start(function *anotherInnerCoroutine() {
+      return 43;
+    })
+  ).await(SYNC), yield *SYNCW(); // wait them both to complete
+}
+```
+
+So the `crtk` - `async` / `await` / `Promise` interop is full two-way, you can mix them for any convenience and leverage the good parts of both.
+
 ## Command line runner
 
-Since 1.1.0 `crtk` comes with helper `crtk-run` that allows to run functions/generators exported from .js files as `crtk`-flavored coroutines directly from command line, which allows to save time when writing quick scripts that use asynchronous APIs. More info [here][link-docs-crtk-run].
+Since 1.1.0 `crtk` comes with helper `crtk-run` that allows to run functions/generators (since 1.3.0, async functions too) exported from .js files as `crtk`-flavored coroutines directly from command line, which allows to save time when writing quick scripts that use asynchronous APIs. More info [here][link-docs-crtk-run].
 
 ## Further reading
 

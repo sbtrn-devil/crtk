@@ -82,6 +82,15 @@ module.exports.whistle = function whistle() {
   // crtk-run runme.js:whistle
   console.log("phew");
 };
+
+// and node 7+ async functions are allowed as well
+const { NowThen } = require('crtk'); // though using them may be more verbose
+module.exports.tiger = async function tiger() {
+  // crtk-run runme.js:tiger
+  var nt = NowThen();
+  await(setTimeout(nt.SYNC, 1000), nt.SYNCW);
+  console.log("well, say meow");
+};
 ```
 
 If export name is not provided, then the module.exports object itself is considered.

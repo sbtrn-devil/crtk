@@ -1,18 +1,22 @@
 {
   "name": "crtk",
-  "version": "1.2.1",
-  "description": "Yet another JS coroutine toolkit based on ES6 generators",
+  "version": "1.3.0",
+  "description": "Yet another JS coroutine toolkit based on ES6+ generators and/or ES2017+ async functions",
   "main": "index.js",
   "scripts": {
     "test": "node test.js"
   },
   "keywords": [
     "es6",
+    "es2017",
     "yield",
     "generator",
     "coroutine",
     "flow",
-    "async"
+    "async",
+    "await",
+    "promise",
+    "promises"
   ],
   "author": "mikle33@yandex.ru",
   "license": "MIT",
@@ -21,8 +25,7 @@
     "url": "https://github.com/sbtrn-devil/ctrk"
   },
   "engines": {
-    "iojs": ">= 1.0.0",
-    "node": ">= 0.12.0"
+    "node": ">= 6.0.0"
   },
   "bin": {
   	"crtk-run": "cli.js"

@@ -6,7 +6,8 @@ const {
 	Awaiter,
 	Checkpoint,
 	Cancellation,
-	CheckpointResult
+	CheckpointResult,
+	NowThen
 } = require("./index.js");
 
 var testCases = {
@@ -87,6 +88,14 @@ var testCases = {
 		assert(r, "Plain function invoked");
 	},
 
+	"CRTK-SRC-A-5-1": // NJS 7+
+	function *(log, assert) {
+		log("Test: coroutine can start from async function");
+		var r;
+		start(async function() { r = true; }).await(SYNC), yield *SYNCW();
+		assert(r, "Async function invoked");
+	},
+
 	"CRTK-SRC-A-6":
 	function *(log, assert) {
 		log("Test: coroutine can return value");
@@ -98,6 +107,13 @@ var testCases = {
 	function *(log, assert) {
 		log("Test: plain function coroutine can return value");
 		var v = (start(function() { return 10; }).await(SYNC), yield *SYNCW());
+		assert(v == 10, "Expected value returned");
+	},
+
+	"CRTK-SRC-A-6-2": // NJS 7+
+	function *(log, assert) {
+		log("Test: async function coroutine can return value");
+		var v = (start(async function() { return 10; }).await(SYNC), yield *SYNCW());
 		assert(v == 10, "Expected value returned");
 	},
 
@@ -127,6 +143,19 @@ var testCases = {
 		assert(false, "Expected a throw");
 	},
 
+	"CRTK-SRC-A-7-2": // NJS 7+
+	function *(log, assert) {
+		log("Test: async function coroutine can throw error");
+		var err = {};
+		try {
+		start(async function () { throw err; }).await(SYNC), yield *SYNCW();
+		} catch (e) {
+			assert(e == err, "Expected value thrown");
+			return;
+		}
+		assert(false, "Expected a throw");
+	},
+
 	"CRTK-SRC-A-8":
 	function *(log, assert) {
 		log("Test: coroutine code starts asynchronously");
@@ -147,6 +176,30 @@ var testCases = {
 		assert(!t, "Coroutine not yet performed");
 		c.await(SYNC), yield *SYNCW();
 		assert(t, "Coroutine performed");
+	},
+
+	"CRTK-SRC-A-9":
+	function *(log, assert) {
+		log("Test: coroutine stores the result");
+		var c = start(function *() {
+			return 100;
+		});
+		c.await(SYNC), yield *SYNCW();
+		assert(c.result == 100, "Expected result is stored");
+	},
+
+	"CRTK-SRC-A-10":
+	function *(log, assert) {
+		log("Test: coroutine stores the error");
+		var c = start(function *() {
+			throw "error";
+		});
+		try {
+			c.await(SYNC), yield *SYNCW();
+			assert(false, "Expected a throw");
+		} catch (e) {
+			assert(c.error == "error", "Expected error is stored");
+		}
 	},
 
 	//
@@ -192,10 +245,12 @@ var testCases = {
 
 	"CRTK-SRC-B-3":
 	function *(log, assert) {
-		log("Test: coroutine can be canceled with a message");
-		var c = start(function *() {
+		log("Test: cancellation callback is triggered on cancellation");
+		var got, c = start(function *() {
 			try {
-				setTimeout(SYNC, 100), yield *SYNCW();
+				setTimeout(SYNC, 100), yield *SYNCW.withCancel(function(msg) {
+					got = msg;
+				});
 			} catch(e) {
 				assert((e instanceof Cancellation) && e.message == "test",
 					"Cancellation with a valid message");
@@ -208,7 +263,7 @@ var testCases = {
 		} catch(e) {
 			return;
 		}
-		assert(false, "Awaiting canceled coroutine must throw");
+		assert(got == "test", "Cancellation callback called and got the valid parameter");
 	},
 
 	"CRTK-SRC-B-4":
@@ -233,6 +288,22 @@ var testCases = {
 			setTimeout(SYNCTL, 100), yield *SYNCW();
 		});
 		c.cancel();
+		try {
+			c.await(SYNC), yield *SYNCW();
+		} catch(e) {
+			assert(!(e instanceof Cancellation), "Awaiting on canceled coroutine throws Error instead of Cancellation");
+			assert(c.error instanceof Cancellation, "Cancellation is stored in canceled coroutine's handle.error");
+			return;
+		}
+		assert(false, "Awaiting canceled coroutine must throw");
+	},
+
+	"CRTK-SRC-B-6":
+	function *(log, assert) {
+		log("Test: cancellation of self throws immediately");
+		var c = start(function *() {
+			c.cancel();
+		});
 		try {
 			c.await(SYNC), yield *SYNCW();
 		} catch(e) {
@@ -728,6 +799,346 @@ var testCases = {
 		assert(!f3 && c3, "Coroutine 3 canceled in the end");
 	},
 
+	"CRTK-SRC-G-7":
+	function *(log, assert) {
+		log("Test: Checkpoint has .done property");
+		var aw = Awaiter(), cp = Checkpoint.allOf(aw);
+		assert(!cp.done, "Checkpoint .done not set before done");
+		aw();
+		cp.await(SYNC), yield *SYNCW();
+		assert(cp.done, "Checkpoint .done set after done");
+	},
+
+	"CRTK-SRC-G-8":
+	function *(log, assert) {
+		log("Test: Checkpoint has .results property");
+		var cp = Checkpoint.allOf();
+		assert(cp.results instanceof Array, "Checkpoint has .results array property");
+	},
+
+	"CRTK-SRC-G-9":
+	function *(log, assert) {
+		log("Test: Checkpoint has .errors property");
+		var cp = Checkpoint.allOf();
+		assert(cp.errors instanceof Array, "Checkpoint has .errors array property");
+	},
+
+	"CRTK-SRC-G-10":
+	function *(log, assert) {
+		log("Test: Null checkpoint is a valid awaitable");
+		var cp = Checkpoint.allOf(), t = false;
+		cp.await(function() { t = true; });
+		setTimeout(SYNC, 100); yield *SYNCW(); // give it chance to work
+		assert(t, "Null checkpoint awaited successfully");
+	},
+
+	"CRTK-SRC-G-11":
+	function *(log, assert) {
+		log("Test: Checkpoint.cancel must propagate");
+		var t1 = false, c1 = start(function *() {
+			setTimeout(SYNC, 100), yield *SYNCW(function(cm) { t1 = cm; });
+		});
+		var t2 = false, c2 = start(function *() {
+			setTimeout(SYNC, 100), yield *SYNCW(function(cm) { t2 = cm; });
+		});
+		var t3 = false, c3 = start(function *() {
+			setTimeout(SYNC, 100), yield *SYNCW(function(cm) { t3 = cm; });
+		});
+		var cp = Checkpoint.allOf(c1, c2, c3);
+		cp.cancel("Y"); // this message must not be used
+		try {
+			cp.await(SYNC), yield *SYNCW();
+			assert(false, "Expected a throw (checkpoint)");
+		} catch (e) {
+		}
+		try {
+			c1.await(SYNC), yield *SYNCW();
+			assert(false, "Expected a throw (coroutine 1)");
+		} catch (e) {
+		}
+		try {
+			c2.await(SYNC), yield *SYNCW();
+			assert(false, "Expected a throw (coroutine 2)");
+		} catch (e) {
+		}
+		try {
+			c3.await(SYNC), yield *SYNCW();
+			assert(false, "Expected a throw (coroutine 3)");
+		} catch (e) {
+		}
+		setTimeout(SYNC, 150); yield *SYNCW();
+		assert(t1 == "Y" && t2 == "Y" && t3 == "Y",
+			"Checkpoint cancellation has propagated correctly");
+	},
+
+	"CRTK-SRC-G-12":
+	function *(log, assert) {
+		log("Test: Checkpoint.cancel is valid after checkpoint is done");
+		var aw = Awaiter(), cp = Checkpoint.allOf(aw);
+		aw();
+		cp.await(SYNC), yield *SYNCW();
+		cp.cancel(); // must not fail
+	},
+
+	"CRTK-SRC-G-13":
+	function *(log, assert) {
+		log("Test: CheckpointResult implements toString");
+		var cp = Checkpoint.allOf();
+		var result = (cp.await(SYNC), yield *SYNCW());
+		assert(result.toString().match(/CheckpointResult/),
+			"CheckpointResult toString worked");
+	},
+
+	//
+	// Promise interaction
+	//
+
+	"CRTK-SRC-H-1":
+	function *(log, assert) {
+		log("Test: Awaiter is a Promise");
+		var aw1 = Awaiter(), t = false;
+		aw1.then(function () { t = true; }, function() {});
+		aw1();
+		assert(t == false, "Awaiter callback code does not run immediately");
+		// give it a chance to trigger
+		setTimeout(SYNC, 100), yield *SYNCW();
+		assert(t == true, "Awaiter resolved as a promise");
+	},
+
+	"CRTK-SRC-H-1-1":
+	function *(log, assert) {
+		log("Test: Awaiter is a Promise and can throw");
+		var aw1 = Awaiter(), t = false;
+		aw1.catch(function () { t = true; });
+		aw1("error");
+		assert(t == false, "Awaiter callback code does not run immediately");
+		// give it a chance to trigger
+		setTimeout(SYNC, 100), yield *SYNCW();
+		assert(t == true, "Awaiter rejected as a promise");
+	},
+
+	"CRTK-SRC-H-1-2":
+	function *(log, assert) {
+		log("Test: Awaiter is a valid Promise");
+		var aw1 = Awaiter(), t = false;
+		// if it is consumed by Promise.all we can believe it's ok
+		Promise.all([aw1]).then(function () { t = true; }, function() {});
+		aw1();
+		assert(t == false, "Awaiter callback code does not run immediately");
+		// give it a chance to trigger
+		setTimeout(SYNC, 100), yield *SYNCW();
+		assert(t == true, "Awaiter resolved as a promise");
+	},
+
+	"CRTK-SRC-H-2":
+	function *(log, assert) {
+		log("Test: Promise is full Awaitable");
+		var promise = new Promise(function(acc, rej) {
+			setTimeout(function () { acc(150); }, 100);
+		});
+		// Checkpoint.allOf checks for sufficient Awaitable-ness
+		var r = (Checkpoint.allOf(promise).await(SYNC), yield *SYNCW());
+		assert(r.results[0] == 150, "Promise returned result as awaitable");
+
+		promise.unawait(function() {}); // full = has unawait too
+	},
+
+	"CRTK-SRC-H-2-1":
+	function *(log, assert) {
+		log("Test: Promise is Awaitable and can reject");
+		var promise = new Promise(function(acc, rej) {
+			setTimeout(function () { rej(150); }, 100);
+		});
+		// Checkpoint.allOf checks for sufficient Awaitable-ness
+		var cp = Checkpoint.allOf(promise);
+		try {
+			Checkpoint.allOf(promise).await(SYNC), yield *SYNCW();
+		} catch (e) {
+		}
+		assert(cp.errors[0] == 150, "Promise rejected result as awaitable");
+	},
+
+	"CRTK-SRC-H-3":
+	function *(log, assert) {
+		log("Test: Promise has .done property");
+		var promise = new Promise(function(acc, rej) {
+			setTimeout(function () { acc(150); }, 100);
+		});
+		assert(!promise.done, "Promise .done not set before done");
+		promise.await(SYNC), yield *SYNCW();
+		assert(promise.done, "Promise .done set after done");
+	},
+
+	"CRTK-SRC-H-4":
+	function *(log, assert) {
+		log("Test: Promise has .result property");
+		var promise = new Promise(function(acc, rej) {
+			setTimeout(function () { acc(150); }, 100);
+		});
+		promise.await(SYNC), yield *SYNCW();
+		assert(promise.result == 150, "Promise stored the result");
+	},
+
+	"CRTK-SRC-H-5":
+	function *(log, assert) {
+		log("Test: Promise has .error property");
+		var promise = new Promise(function(acc, rej) {
+			setTimeout(function () { rej(150); }, 100);
+		});
+		try {
+			promise.await(SYNC), yield *SYNCW();
+		} catch (e) {
+		}
+		assert(promise.error == 150, "Promise stored the error");
+	},
+
+	//
+	// NowThen (all tests are NJS 7+)
+	//
+	"CRTK-SRC-I-1":
+	function *(log, assert) {
+		log("Test: await ((...NowThen.SYNC...), NowThen.SYNCW) is able to resume a coroutine");
+		var t = false, c = start(async function () {
+				var nt = NowThen();
+				await (setTimeout(nt.SYNC, 1), nt.SYNCW);
+				t = true;
+				return 150;
+			});
+		setTimeout(SYNC, 100), yield *SYNCW(); // give it a chance
+		c.await(SYNC), yield *SYNCW();
+		assert(t, "The coroutine successfully progressed via nt.SYNC/SYNCW");
+		assert(c.result == 150, "Valid value was passed to nt.SYNC");
+	},
+
+	"CRTK-SRC-I-2":
+	function *(log, assert) {
+		log("Test: NowThen.SYNC/SYNCW generated properly in complex expressions");
+		function f1(callback, x) {
+			start(async function() { callback (null, x); });
+		}
+		function f2(callback, x, y) {
+			start(async function() { callback (null, x + y); });
+		}
+		var t;
+		start (async function () {
+			var nt = NowThen();
+			t = await (
+				f2(nt.SYNC, await(
+						f1(nt.SYNC, "1"), nt.SYNCW
+					), await(
+						f1(nt.SYNC, "2"), nt.SYNCW
+					)),
+				nt.SYNCW);
+			assert(t == "12", "The calls are properly performed");
+		}).await(SYNC), yield *SYNCW();
+		assert(t, "The coroutine successfully progressed via nt.SYNC/SYNCW");
+	},
+
+	"CRTK-SRC-I-3":
+	function *(log, assert) {
+		log("Test: await ((...NowThen.SYNCTL...), NowThen.SYNCW) is able to resume a coroutine");
+		var t = false, c = start(async function () {
+				var nt = NowThen();
+				var result = await (function(callback) {
+					setTimeout(function() {
+						console.log("OK");
+						callback(100);
+					}, 1);
+				} (nt.SYNCTL), nt.SYNCW);
+				t = true;
+				return result;
+			});
+		setTimeout(SYNC, 100), yield *SYNCW(); // give it a chance
+		c.await(SYNC), yield *SYNCW();
+		assert(t, "The coroutine successfully progressed via nt.SYNCTL/SYNCW");
+		assert(c.result == 100, "Valid value was passed to nt.SYNCTL");
+	},
+
+	//
+	// parameter error checks
+	//
+	"CRTK-SRC-J-1":
+	function *(log, assert) {
+		log("Test: start only accepts a function");
+		try {
+			start("stuff");
+			assert(false, "An error must be raised");
+		} catch (e) {
+			assert(true, "The error raised correctly");
+		}
+	},
+
+	"CRTK-SRC-J-2":
+	function *(log, assert) {
+		log("Test: coroutine handle expects a function for await callback");
+		try {
+			var c = start(function *() {});
+			c.await("stuff");
+			assert(false, "An error must be raised");
+		} catch (e) {
+			assert(true, "The error raised correctly");
+		}
+	},
+
+	"CRTK-SRC-J-3":
+	function *(log, assert) {
+		log("Test: coroutine does not allow to await for itself");
+		try {
+			var c = start(function *() {
+				c.await(SYNC), yield *SYNCW();
+			});
+			c.await(SYNC), yield *SYNCW();
+			assert(false, "An error must be raised");
+		} catch (e) {
+			assert(true, "The error raised correctly");
+		}
+	},
+
+	"CRTK-SRC-J-4":
+	function *(log, assert) {
+		log("Test: new Awaiter() is not allowed");
+		try {
+			new Awaiter();
+			assert(false, "An error must be raised");
+		} catch (e) {
+			assert(true, "The error raised correctly");
+		}
+	},
+
+	"CRTK-SRC-J-5":
+	function *(log, assert) {
+		log("Test: Awaiter expects a function for await callback");
+		try {
+			var c = Awaiter();
+			c.await("stuff");
+			assert(false, "An error must be raised");
+		} catch (e) {
+			assert(true, "The error raised correctly");
+		}
+	},
+
+	"CRTK-SRC-J-6":
+	function *(log, assert) {
+		log("Test: Checkpoint expects Awaitables");
+		try {
+			var c = Checkpoint.allOf("stuff");
+			assert(false, "An error must be raised");
+		} catch (e) {
+			assert(true, "The error raised correctly");
+		}
+	},
+
+	"CRTK-SRC-J-7":
+	function *(log, assert) {
+		log("Test: new NowThen() is not allowed");
+		try {
+			new NowThen();
+			assert(false, "An error must be raised");
+		} catch (e) {
+			assert(true, "The error raised correctly");
+		}
+	},
+
 	//
 	// issues
 	//
@@ -765,7 +1176,31 @@ var testCases = {
 			})).await(SYNC), yield *SYNCW();
 		}
 		assert(callbacks.size == 0, "Unawait was applied to unused Awaitable-s");
-	}
+	},
+
+	"CRTK-ISSUES-3":
+	function *(log, assert) {
+		log("Test: cancellation message is delivered to cancellation callback");
+		var got = false, c1 = start(function *() {
+			setTimeout(SYNC, 100), yield *SYNCW.withCancel(
+				function(msg) { got = msg; }
+			);
+		});
+		c1.cancel("Y");
+		try {
+			c1.await(SYNC), yield *SYNCW();
+			assert(false, "Expected a throw");
+		} catch (e) {
+		}
+		assert(got == "Y", "Expected value passed from cancellation callback");
+	},
+
+	"CRTK-ISSUES-4":
+	function *(log, assert) {
+		log("Test: Checkpoint.done is set immediately for a null checkpoint");
+		var cp = Checkpoint.allOf();
+		assert(cp.done, "The .done is set correctly");
+	},
 };
 
 //

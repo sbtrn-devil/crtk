@@ -37,6 +37,25 @@ Read-only property that is `false` when an operation is still running or `true` 
 
 Sets to `true` just before a notification callback is called, therefore is always seen as `true` from callbacks code.
 
+## 'Promise-ish': _interface_ (since 1.3.0)
+
+This interface is compatible with that of ES native `Promise` to a degree enough that the implementing object can be used with ES2017 `await` statement.
+
+`'Promise-ish'` object also works in other basic `Promise` use cases (`Promise.all`, `Promise.resolve` etc.), but its primary purpose in `crtk` is to bridge the implementing objects to `await`, so other uses are not a goal.
+
+### .then(resultCallback, errorCallback): _method_
+
+- resultCallback: _function(result)_
+- errorCallback: _function(err)_
+
+Implements `Promise.then` method. Refer to ES `Promise` spec for more details on the logic behind it.
+
+### .catch(errorCallback): _method_
+
+- errorCallback: _function(err)_
+
+Implements `Promise.catch` method. Refer to ES `Promise` spec for more details on the logic behind it.
+
 ## 'Cancellable': _interface_
 
 - extends: `'Awaitable'`
@@ -59,16 +78,21 @@ Cancel request may come with an attached cancellation message, specified by the 
 
 ## start(mainFunction, ...args): _function: 'CoroutineHandle'_
 
-- `mainFunction`: _generator_ or _function_ - the coroutine main function
+- `mainFunction`: _generator_, _function_ or _async function_ - the coroutine main function
 - `args`: list of _any_ - arguments to pass to the coroutine main function
 - return: handle of the started coroutine
 
 The function starts a coroutine that executes given function.
 
-In most cases you want to pass a generator for `mainFunction`, as you can use `yield` operator in meaning of "wait for asynchronous result" (see `SYNC`/`SYNCTL` and `SYNCW`). However, usual function is allowed too. The logic of coroutine framework will be the same in either case, the code of a plain function will just be not able to leverage yielding.
+In most cases you want to pass a generator for `mainFunction`, as you can use `yield` operator in meaning of "wait for asynchronous result" (see `SYNC`/`SYNCTL` and `SYNCW`). However, usual function and (in node 7+) `async` function is allowed too. The logic of coroutine framework will be the same in either case, though using non-generator will have some disatvantages:
+
+- the code of a plain function will be not able to leverage yielding or any other coroutine features (pseugo-globals, feedback events emission, cancellation - read further for more on all of these),
+- the code of `async` function will be not able to leverage any coroutine features, and will need `NowThen` helper to use `SYNC`+`SYNCW` pattern with `await`.
+
+Therefore `crtk` encourages use of generator-based coroutines, as they have the strongest support.
 
 ```js
-const start = require("crtk");
+const { start } = require("crtk");
 
 function *thisIsAGenarator() {
   console.log("Step 1: sleep for 250 seconds...");
@@ -90,6 +114,18 @@ function thisIsAPlainFunction() {
 }
 
 start(thisIsAPlainFunction);
+
+// node 7+ only
+const { NowThen } = require("crtk");
+async function thisIsAnAsyncFunction() {
+  var nt = NowThen();
+  console.log("Step 1: sleep for 250 seconds...");
+  setTimeout(nt.SYNC, 250); await nt.SYNCW;
+  // or: await(setTimeout(nt.SYNC, 250), nt.SYNCW);
+  console.log("Step 2: ok");
+}
+
+start(thisIsAnAsyncFunction);
 ```
 
 Multiple coroutines can be started and work in parallel (in meaning of single-threaded asynchronous parallelism established in JS).
@@ -113,7 +149,7 @@ start(sleep, 1000);
 
 `start` returns a coroutine handle, object that allows to control and synchronize on the coroutine. See `'CoroutineHandle'` for more info. Coroutine code will start actual execution on next soonest asynchronous occasion.
 
-Note that, from coroutine perspective, any pending asynchronous code (including code from other coroutines) is only "allowed" to run during `yield *SYNCW()` statements.
+Note that, from coroutine perspective, any pending asynchronous code (including code from other coroutines) is only "allowed" to run during `yield *SYNCW()` statements (`await nowThen.SYNCW` for `async` function based coroutines).
 
 ## startMethod: _Symbol_
 
@@ -149,6 +185,8 @@ The `object[startMethod]` method works exactly the same as `start` function, exc
 In `crtk` there are several special variables: `SYNC`, `SYNCTL`, `SYNCW` and `CRTN`. Semantically, they are global, but via some automagic they only are defined while JS is executing code inside a generator or function that was started as coroutine (via `start` or `Object[startMethod]`), and they are specific to the current coroutine (so they effectively are "coroutine local variables"). For this period they will also hide real globals with same names (if there happen to be any, which we hope is unlikely).
 
 You don't need to import any symbols to access `crtk` pseudo-globals, they will just work on demand.
+
+*NOTE!* Pseudo-globals are *only available* in generator based coroutines.
 
 ```js
 // myscript.js
@@ -191,7 +229,7 @@ function *main() {
 }
 ```
 
-- Though they are "variables", do not change them, do not cache in other variables/object fields (`CRTN` is a partial exception to this point), and do not pass outside the coroutine, except for in ways they are officially intended for use. They are managed by the framework, and let them be. For the same reason, don't use them inside nested functions if you intend to use these functions as observers or asynchronous callbacks:
+- Though they are "variables", do not change them, do not cache in other variables/object fields (`CRTN` is a partial exception to this point), and do not pass outside the coroutine, except for in ways they are officially intended to use. They are managed by the framework, and let them be. For the same reason, don't use them inside nested functions if you intend to use these functions as observers or asynchronous callbacks:
 
 ```js
 function *coroutine() {
@@ -357,7 +395,7 @@ function *cancelAware() {
 
 The `cancelMsg` parameter is the cancellation message value provided by caller of `'CoroutineHandle'.cancel`.
 
-`cancelCallback` will only be called if the cancel occurs during this particular  `yield *SYNCW()`.
+`cancelCallback` will only be called if the cancel occurs during this particular `yield *SYNCW()`.
 
 #### .withCancel(cancelCallback): _generator_
 
@@ -424,6 +462,7 @@ function *trackClicksFor1Sec(clickable) {
 
 - implements: `'Awaitable'`
 - implements: `'Cancellable'`
+- implements: `'Promise-ish'` (since 1.3.0)
 
 When you start a coroutine via `start` or `startMethod` helpers (see below), value returned by them is an instance of `CoroutineHandle`. This object allows to keep track and sync on coroutine, and to obtain results on its completion. Coroutine (and the `'Awaitable'` it implements) is completed when control flow exits its starting function (returned or thrown).
 
@@ -481,6 +520,8 @@ Requests the coroutine to cancel. The cancel is enforced by making all subsequen
 Throwing semantics allows the coroutine to finalize its cancellation gracefully in natural exception unwinding way.
 
 Remember that no more awaiting for asynchronous operations are allowed in the coroutine after cancellation. If your finalization logic needs ones then you have to start that logic in a new coroutine.
+
+*NOTE!* `.cancel` can be applied to any coroutine handle, but works to a limited degree on `async` function based coroutine: it cancels awaiting of the underlying `async` function, but does not affect the running function itself. There is no official way to pass cancellation to a running `async` function, so if you need it you'll have to invent wheels. Blame ES `async` / `await` / `Promise` design.
 
 ### .emit(channel, ...args): _method_
 
@@ -623,6 +664,7 @@ Converts the `Cancellation` to string. Similarly to `Error`, the string is "Canc
 ## Awaiter: _class_
 
 - implements: `'Awaitable'`
+- implements: `'Promise-ish'` (since 1.3.0)
 
 `Awaiter` is designed as an adapter from callback-based asynchronous result providers to `Awaitable`. On one hand, it is a function of `(err, result)` signature that can be used as a callback to accept some asynchronous result. On another hand, it stores the result and is `Awaitable` that reflects its obtainment.
 
@@ -744,6 +786,7 @@ Note that if checkpoint finishes before all of its `Awaitable`-s finish, its res
 
 - implements: `'Awaitable'`
 - implements: `'Cancellable'`
+- implements: `'Promise-ish'` (since 1.3.0)
 
 The "handle" to actual instance of the checkpoint. Exposes waiting operations and access to the total results.
 
@@ -897,3 +940,99 @@ Stack trace of throwing the `CheckpointResult`. Is only defined if `CheckpointRe
 - return: stringified value of the object
 
 Returns stringification of `CheckpointResult` (message of form "CheckpointResult: errors = [...], successes = [...]").
+
+## Promise.prototype: _patched ES class_ (since 1.3.0)
+
+- implements: `'Awaitable'`
+
+`crtk` exends the native ES `Promise` class with some capabilities. The most important one is that a promise instance is now `'Awaitable'`, and as such it can be used in all use cases involving an `'Awaitable'` object.
+
+```js
+// node 7+ only
+function *doStuff() {
+  async function doAsync() {
+    return 100500;
+  }
+
+  // since we are not in async function we can't use "await doAsync()", but...
+  var asyncResult = (doAsync().await(SYNC), yield *SYNCW());
+  console.log(asyncResult); // naturally 100500
+}
+```
+
+_NOTE!!!_ The extensions only apply to native ES `Promise` (specifically targeting `async` functions). They do not affect foreign promises from `bluebird`, `q` and other written-of-despair promise libraries.
+
+### .error: _any or undefined_
+
+After `Promise` instance is `.done == true` and the result was rejection, `.error` field will be defined and contain the error object (one provided in the promise rejection).
+
+### .result: _any or undefined_
+
+After `Promise` instance is `.done == true` and the result was a success, `.result` field will be defined and contain the result value (one provided in the promise fulfillment).
+
+## NowThen: _class_ (since 1.3.0)
+
+When writing a coroutine based on an `async` function, the `crtk` pseudo-globals including `SYNC`, `SYNCTL` and `SYNCW` are not available. In order to deal with callback driven functions under this condition, `NowThen` helper is provided.
+
+```js
+const {
+  NowThen
+} = require("crtk");
+
+async function waitFor250Ms() {
+  // note that construction of an NowThen is STRICTLY without 'new'
+  // it is recommended to create it as a local variable, one per function
+  // is enough
+  var nt = NowThen();
+
+  await (setTimeout(nt.SYNC, 250), nt.SYNCW);
+}
+
+// note it is just an async function with no extra contracts,
+// you don't have to call it in a crtk coroutine
+// and can just call it "standalone"
+var waitingPromise = waitFor250Ms();
+```
+
+The pattern works exactly like `crtk`'s standard `SYNC[TL]` / `SYNCW`, just inside an `async` function.
+
+### .SYNC: _function(err, result)_
+
+Returns a callback that will resolve or reject promise delivered by next `.SYNCW` of this `NowThen` instance. The callback signature is `(err, result)` where non-false `err` means an error, and `result` means normal result.
+
+### .SYNCTL: _function(err, result)_
+
+'Throwless' version of `.SYNC`, returns a callback that will resolve promise delivered by next `.SYNCW` of this `NowThen` instance. The callback signature is `(result)` where `result` is the returned result.
+
+### .SYNCW: _Promise_
+
+Returns an instance of `Promise` that will be resolved by calling a callback provided by previous `.SYNC` or `.SYNC[TL]` of this `NowThen` instance.
+
+The common use pattern is as described above:
+
+```js
+async function userFunction() {
+  var nt = NowThen();
+  ...
+  // function callbackDrivenFunction(..., callback)
+  var result = await(callbackDrivenFunction(..., nt.SYNC), nt.SYNCW);
+}
+```
+
+`NowThen` instance is inherently reusable, and essentially works as `.SYNC[TL]` / `SYNCW` stack: reading these from the same instance can be 'nested', so that `.SYNCW` delivers promises corresponding to correct `.SYNC[TL]`-s even in complex expressions, and you can work (though not forced to) with one single instance of `NowThen`:
+
+```js
+async function userFunction() {
+  var nt = NowThen();
+  ...
+  // function calcSomething(callback, x)
+  var result = await(calcSomething(nt.SYNC,
+    await (calcSomething(nt.SYNC,
+      1), nt.SYNCW)
+    + await (calcSomething(nt.SYNC,
+      1), nt.SYNCW)), nt.SYNCW);
+  // ^async sort of "calcSomething(calcSomething(1) + calcSomething(2))"
+}
+```
+
+Technically it is sufficient to have one `NowThen` instance per whole module at all, but it is recommended to make it a local variable and set it to a new instance in every `async` function. This way you ensure that possible misuse of an instance does not have side effects on the others.

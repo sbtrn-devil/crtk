@@ -26,6 +26,8 @@ function execAsync(callback, ...args) {
 	process.nextTick(callback.bind.apply(callback, [GLOBAL, ...args]));
 };
 
+const PROMISE_AVAILABLE = (typeof(Promise) != 'undefined');
+
 //
 // Cancellation
 //
@@ -40,6 +42,42 @@ function Cancellation(msg) {
 }
 
 //
+// Promisification of awaitable
+//
+
+const $awaiterPromise = Symbol();
+function ensureBackingPromise(awaitable) {
+	var result = awaitable[$awaiterPromise];
+	if (!result) {
+		result = awaitable[$awaiterPromise] = new Promise(
+			function(accept, reject) {
+				awaitable.await(function (e, r) {
+					if (e) {
+						reject(e);
+					} else {
+						accept(r);
+					}
+				});
+			});
+	}
+
+	return result;
+}
+
+function maybePromisifyAwaitable(awaitable) {
+	if (PROMISE_AVAILABLE) {
+		awaitable.then = function(...args) {
+			return ensureBackingPromise(awaitable).then(...args);
+		}
+		awaitable.catch = function(...args) {
+			return ensureBackingPromise(awaitable).catch(...args);
+		}
+	}
+
+	return awaitable;
+}
+
+//
 // start and the core stuff
 //
 
@@ -48,13 +86,22 @@ const start = module.exports.start =
 function start(gFunc, ...theArgs) {
 	// prechecks
 	if (typeof(gFunc) != 'function') {
-		throw new Error("Can only start with a function or a generator function");
+		throw new Error("Can only start with a function, async function or a generator function");
 	}
-	if (!(gFunc instanceof Generator)) {
+	if (gFunc.constructor.name == 'AsyncFunction') {
+		// NJS7+ async function wraps into generator
+		var bindTo = this, func = gFunc;
+		gFunc = function *asyncFuncWrapper() {
+			// make use of assumption the Promise is patched by our await
+			return (func.apply(bindTo, ...theArgs).await(SYNC), yield *SYNCW());
+		};
+	} else if (!(gFunc instanceof Generator)) {
 		// plain function wraps into generator
 		var bindTo = this, func = gFunc;
-		gFunc = function *() { return func.apply(bindTo, ...theArgs); };
-	}
+		gFunc = function *plainFuncWrapper() {
+			return func.apply(bindTo, ...theArgs);
+		};
+	} // otherwise it already is a generator, not wrapping
 
 	var first = true,curSyncr, onceListeners = null;
 	function getOnceListenersFor(channel) {
@@ -190,7 +237,7 @@ function start(gFunc, ...theArgs) {
 			yield yieldCount++;
 		}
 		if (thisCrtn[$cancelled]) {
-			cancellationCallback && cancellationCallback();
+			cancellationCallback && cancellationCallback(thisCrtn[$cancelMsg]);
 			throw new Cancellation(thisCrtn[$cancelMsg]);
 		}
 		thisCrtn[$resultAvailable] = false; // we are going to use it up
@@ -224,6 +271,7 @@ function start(gFunc, ...theArgs) {
 				execAsync(function() {
 					if (GLOBAL.CRTN==thisCrtn) {
 						// not yet yielded from current crt
+						// (should never happen, but just in case)
 						thisCrtn[$resultAvailable] = true;
 						thisCrtn[$error] = error;
 						thisCrtn[$result] = result;
@@ -285,7 +333,7 @@ function start(gFunc, ...theArgs) {
 
 	thisCrtn[$theIterator] = gFunc.apply(this, theArgs);
 	execAsync(getSyncr(), null, null); // schedule the 1st step
-	return thisCrtn;
+	return maybePromisifyAwaitable(thisCrtn);
 }
 
 //
@@ -294,8 +342,8 @@ function start(gFunc, ...theArgs) {
 
 Object.defineProperty(Object.prototype, startMethod,
 {
-	value: function(id,...args) {
-		return start.apply(this,[this[id],...args]);
+	value: function(id, ...args) {
+		return start.apply(this, [this[id], ...args]);
 	},
 	enumerable: false
 });
@@ -361,7 +409,63 @@ const Awaiter = module.exports.Awaiter = function Awaiter() {
 			return r;
 		}
 	};
-	return theAwaiter;
+	return maybePromisifyAwaitable(theAwaiter);
+}
+
+//
+// Awaiterification of promise
+//
+
+if (PROMISE_AVAILABLE) {
+
+const $promiseAwaiter = Symbol();
+
+function ensureBackingAwaiter(promise) {
+	var result = promise[$promiseAwaiter];
+	if (!result) {
+		result = promise[$promiseAwaiter] = Awaiter();
+		promise.then(function(r) {
+				result(null, r);
+			}, function(e) {
+				result(e);
+			});
+	}
+	return result;
+}
+
+Promise.prototype.await = function(callback) {
+	return ensureBackingAwaiter(this).await(callback);
+};
+
+Promise.prototype.unawait = function(callback) {
+	return ensureBackingAwaiter(this).unawait(callback);
+};
+
+Object.defineProperty(Promise.prototype, 'done',
+{
+	get: function() {
+		return ensureBackingAwaiter(this).done;
+	},
+	enumerable: false
+});
+
+Object.defineProperty(Promise.prototype, 'result',
+{
+	get: function() {
+		return ensureBackingAwaiter(this).result;
+	},
+	enumerable: false
+});
+
+Object.defineProperty(Promise.prototype, 'error',
+{
+	get: function() {
+		return ensureBackingAwaiter(this).error;
+	},
+	enumerable: false
+});
+
+
 }
 
 //
@@ -406,19 +510,11 @@ function checkpointCreate(arrayOfAwaiters, waitUpTo) {
 		stopOn1stError = false, mustCancelAbandoned = false, cancelMsg,
 		done = false;
 	const finalAwaiter = Awaiter();
-	finalAwaiter.__proto__ = {
-		__proto__: finalAwaiter.__proto__,
-		get errors() {
-			return errors;
-		},
-		get successes() {
-			return successes;
-		}
-	};
 
 	var canceled = false, callback = null, unawaitAwaiters = null;
 	if (waitUpTo <= 0) {
 		// nothing to wait, trigger at once
+		done = true;
 		finalAwaiter(null, new CheckpointResult(errors, results));
 	} else {
 		var unawaited = false;
@@ -476,7 +572,7 @@ function checkpointCreate(arrayOfAwaiters, waitUpTo) {
 	}
 
 	var me;
-	return (me = {
+	return maybePromisifyAwaitable(me = {
 		stopOnFirstError: function stopOnFirstError(yes) {
 			stopOn1stError = yes;
 			return me;
@@ -527,3 +623,30 @@ const Checkpoint = module.exports.Checkpoint =
 		return checkpointCreate(arrayOfAwaiters, 1);
 	}
 };
+
+//
+// NowThen
+//
+
+module.exports.NowThen = function NowThen() {
+	if (this instanceof NowThen) {
+		throw new Error("Use NowThen(), not new NowThen()");
+	}
+
+	var stack = new Array();
+	return ({
+		get SYNC() {
+			var awaiter = Awaiter();
+			stack.push(awaiter);
+			return awaiter;
+		},
+		get SYNCTL() {
+			var awaiter = Awaiter();
+			stack.push(awaiter);
+			return function(r) { awaiter(null, r); };
+		},
+		get SYNCW() {
+			return stack.pop();
+		}
+	});
+}
