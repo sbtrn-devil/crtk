@@ -1,4 +1,4 @@
-[![coverage-98%](https://img.shields.io/badge/coverage-98%25-brightgreen.svg?style=flat)](coverage/lcov-report/index.html)
+[![coverage-98%](https://img.shields.io/badge/coverage-98%25-brightgreen.svg?style=flat)](https://codecov.io/gh/sbtrn-devil/crtk)
 
 # crtk
 
