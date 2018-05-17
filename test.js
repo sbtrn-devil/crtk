@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// use: node test.js
+// or for coverage: istanbul node test.js
 
 const {
 	start,
