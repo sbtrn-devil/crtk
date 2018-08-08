@@ -345,7 +345,8 @@ Object.defineProperty(Object.prototype, startMethod,
 	value: function(id, ...args) {
 		return start.apply(this, [this[id], ...args]);
 	},
-	enumerable: false
+	enumerable: false,
+	configurable: true
 });
 
 // to prevent incorrect usage of start as of free function without including the
@@ -353,7 +354,8 @@ Object.defineProperty(Object.prototype, startMethod,
 Object.defineProperty(GLOBAL, startMethod,
 {
 	value: undefined,
-	enumerable: false
+	enumerable: false,
+	configurable: true
 });
 
 //
@@ -446,7 +448,8 @@ Object.defineProperty(Promise.prototype, 'done',
 	get: function() {
 		return ensureBackingAwaiter(this).done;
 	},
-	enumerable: false
+	enumerable: false,
+	configurable: true
 });
 
 Object.defineProperty(Promise.prototype, 'result',
@@ -454,7 +457,8 @@ Object.defineProperty(Promise.prototype, 'result',
 	get: function() {
 		return ensureBackingAwaiter(this).result;
 	},
-	enumerable: false
+	enumerable: false,
+	configurable: true
 });
 
 Object.defineProperty(Promise.prototype, 'error',
@@ -462,7 +466,8 @@ Object.defineProperty(Promise.prototype, 'error',
 	get: function() {
 		return ensureBackingAwaiter(this).error;
 	},
-	enumerable: false
+	enumerable: false,
+	configurable: true
 });
 
 
