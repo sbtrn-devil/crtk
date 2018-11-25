@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 // use: node test.js
-// or for coverage: istanbul node test.js
 
 const {
 	start,
@@ -314,6 +313,18 @@ var testCases = {
 			return;
 		}
 		assert(false, "Awaiting canceled coroutine must throw");
+	},
+
+	"CRTK-SRC-B-7":
+	function *(log, assert) {
+		log("Test: Cancellation may not be constructed manually");
+		var ok = false;
+		try {
+			new Cancellation("cancellation msg");
+		} catch(e) {
+			ok = true;
+		}
+		assert(ok, "Error is thrown on manual construction of Cancellation");
 	},
 
 	//
@@ -891,6 +902,356 @@ var testCases = {
 			"CheckpointResult toString worked");
 	},
 
+	"CRTK-SRC-G-14": // NJS 7+
+	function *(log, assert) {
+		log("Test: Checkpoint accepts iterators and promises");
+		var cp = Checkpoint.allOf(
+			function *(x) { return x + 1; }(100),
+			async function(x) { return x + 3; }(200));
+		var result = (cp.await(SYNC), yield *SYNCW());
+		assert(result.results[0] == 101 || result.results[1] == 101,
+			"Iterator based checkpoint entry returned the expected result");
+		assert(result.results[0] == 203 || result.results[1] == 203,
+			"Promise based checkpoint entry returned the expected result");
+	},
+
+	"CRTK-SRC-G-15": // NJS 7+
+	function *(log, assert) {
+		log("Test: Checkpoint accepts iterators and promises, and they may throw");
+		var cp = Checkpoint.allOf(
+			function *(x) { throw x + 1; }(100),
+			async function(x) { throw x + 3; }(200));
+		var result = [];
+		try {
+			cp.await(SYNC), yield *SYNCW();
+		} catch (e) {
+			result = e;
+		}
+		assert(result.errors[0] == 101 || result.errors[1] == 101,
+			"Iterator based checkpoint entry threw the expected result");
+		assert(result.errors[0] == 203 || result.errors[1] == 203,
+			"Promise based checkpoint entry threw the expected result");
+	},
+
+	"CRTK-SRC-G-16": // NJS 7+
+	function *(log, assert) {
+		log("Test: Checkpoint rejects invalid entries");
+		var thrown = 0,
+			badOfferings = [
+				0,
+				null,
+				1,
+				"string",
+				"",
+				{}
+			];
+		for (var offering of badOfferings) {
+			try {
+				Checkpoint.allOf(offering);
+			} catch (e) {
+				thrown++;
+			}
+		}
+
+		assert(thrown == badOfferings.length,
+			"Checkpoint rejected all the invalid entries");
+	},
+
+	"CRTK-SRC-G-17":
+	function *(log, assert) {
+		log("Test: CheckpointResult may not be constructed manually");
+		var ok = false;
+		try {
+			new CheckpointResult([], []);
+		} catch(e) {
+			ok = true;
+		}
+		assert(ok, "Error is thrown on manual construction of CheckpointResult");
+	},
+
+	"CRTK-SRC-G-18":
+	function *(log, assert) {
+		log("Test: allIn waits for all awaitables in array and puts results by key");
+		var f1 = false, f2 = false, f3 = false;
+		var ch1 = start(function *() {
+				setTimeout(SYNC, 100); yield *SYNCW();
+				f1 = true;
+				return "C1";
+			}),
+			ch2 = start(function *() {
+				setTimeout(SYNC, 250); yield *SYNCW();
+				f2 = true;
+				return "C2";
+			}),
+			ch3 = start(function *() {
+				setTimeout(SYNC, 500); yield *SYNCW();
+				f3 = true;
+				return "C3";
+			});
+		var cp = (Checkpoint.allIn([ch2, ch1, ch3]).await(SYNC), yield *SYNCW());
+		assert(f1, "Coroutine 1 finished");
+		assert(f2, "Coroutine 2 finished");
+		assert(f3, "Coroutine 3 finished");
+		assert(cp.results[0] == "C2", "Coroutine 2 result got into valid slot");
+		assert(cp.results[1] == "C1", "Coroutine 1 result got into valid slot");
+		assert(cp.results[2] == "C3", "Coroutine 3 result got into valid slot");
+	},
+
+	"CRTK-SRC-G-19":
+	function *(log, assert) {
+		log("Test: allIn waits for all awaitables in dictionary and puts results by key");
+		var f1 = false, f2 = false, f3 = false;
+		var ch1 = start(function *() {
+				setTimeout(SYNC, 100); yield *SYNCW();
+				f1 = true;
+				return "C1";
+			}),
+			ch2 = start(function *() {
+				setTimeout(SYNC, 250); yield *SYNCW();
+				f2 = true;
+				return "C2";
+			}),
+			ch3 = start(function *() {
+				setTimeout(SYNC, 500); yield *SYNCW();
+				f3 = true;
+				return "C3";
+			});
+		var cp = (Checkpoint.allIn({ a: ch2, b: ch1, c: ch3 }).await(SYNC), yield *SYNCW());
+		assert(f1, "Coroutine 1 finished");
+		assert(f2, "Coroutine 2 finished");
+		assert(f3, "Coroutine 3 finished");
+		assert(cp.results.a == "C2", "Coroutine 2 result got into valid slot");
+		assert(cp.results.b == "C1", "Coroutine 1 result got into valid slot");
+		assert(cp.results.c == "C3", "Coroutine 3 result got into valid slot");
+	},
+
+	"CRTK-SRC-G-20":
+	function *(log, assert) {
+		log("Test: anyIn waits for soonest awaitable in array and puts results by key");
+		var f1 = false, f2 = false, f3 = false;
+		var ch1 = start(function *() {
+				setTimeout(SYNC, 100); yield *SYNCW();
+				f1 = true;
+				return "C1";
+			}),
+			ch2 = start(function *() {
+				setTimeout(SYNC, 250); yield *SYNCW();
+				f2 = true;
+				return "C2";
+			}),
+			ch3 = start(function *() {
+				setTimeout(SYNC, 500); yield *SYNCW();
+				f3 = true;
+				return "C3";
+			});
+		var cp = (Checkpoint.anyIn([ch2, ch1, ch3]).await(SYNC), yield *SYNCW());
+		assert(f1, "Coroutine 1 finished on anyOf");
+		assert(!f2, "Coroutine 2 not finished on anyOf");
+		assert(!f3, "Coroutine 3 not finished on anyOf");
+
+		Checkpoint.allOf(ch1, ch2, ch3).await(SYNC), yield *SYNCW();
+		assert(f1, "Coroutine 1 finished at all");
+		assert(f2, "Coroutine 2 finished at all");
+		assert(f3, "Coroutine 3 finished at all");
+
+		assert(typeof (cp.results[0]) == "undefined", "Coroutine 2 result correctly dismissed");
+		assert(cp.results[1] == "C1", "Coroutine 1 result got into valid slot");
+		assert(typeof (cp.results[2]) == "undefined", "Coroutine 3 result correctly dismissed");
+	},
+
+	"CRTK-SRC-G-21":
+	function *(log, assert) {
+		log("Test: anyIn waits for soonest awaitable in dictionary and puts results by key");
+		var f1 = false, f2 = false, f3 = false;
+		var ch1 = start(function *() {
+				setTimeout(SYNC, 100); yield *SYNCW();
+				f1 = true;
+				return "C1";
+			}),
+			ch2 = start(function *() {
+				setTimeout(SYNC, 250); yield *SYNCW();
+				f2 = true;
+				return "C2";
+			}),
+			ch3 = start(function *() {
+				setTimeout(SYNC, 500); yield *SYNCW();
+				f3 = true;
+				return "C3";
+			});
+		var cp = (Checkpoint.anyIn({ a: ch2, b: ch1, c: ch3 }).await(SYNC), yield *SYNCW());
+		assert(f1, "Coroutine 1 finished on anyOf");
+		assert(!f2, "Coroutine 2 not finished on anyOf");
+		assert(!f3, "Coroutine 3 not finished on anyOf");
+
+		Checkpoint.allOf(ch1, ch2, ch3).await(SYNC), yield *SYNCW();
+		assert(f1, "Coroutine 1 finished at all");
+		assert(f2, "Coroutine 2 finished at all");
+		assert(f3, "Coroutine 3 finished at all");
+
+		assert(typeof (cp.results.a) == "undefined", "Coroutine 2 result correctly dismissed");
+		assert(cp.results.b == "C1", "Coroutine 1 result got into valid slot");
+		assert(typeof (cp.results.c) == "undefined", "Coroutine 3 result correctly dismissed");
+	},
+
+	///
+	"CRTK-SRC-G-22":
+	function *(log, assert) {
+		log("Test: allIn waits for all awaitables in array and puts errors by key");
+		var f1 = false, f2 = false, f3 = false;
+		var ch1 = start(function *() {
+				setTimeout(SYNC, 100); yield *SYNCW();
+				f1 = true;
+				throw "C1";
+			}),
+			ch2 = start(function *() {
+				setTimeout(SYNC, 250); yield *SYNCW();
+				f2 = true;
+				throw "C2";
+			}),
+			ch3 = start(function *() {
+				setTimeout(SYNC, 500); yield *SYNCW();
+				f3 = true;
+				throw "C3";
+			});
+		try {
+			Checkpoint.allIn([ch2, ch1, ch3]).await(SYNC), yield *SYNCW();
+			assert(false, "Throw expected");
+		} catch (cp) {
+			if (cp.isAssertionFailure) throw cp; // assersion, rethrow
+			assert(f1, "Coroutine 1 finished");
+			assert(f2, "Coroutine 2 finished");
+			assert(f3, "Coroutine 3 finished");
+			assert(cp.errors[0] == "C2", "Coroutine 2 error got into valid slot");
+			assert(cp.errors[1] == "C1", "Coroutine 1 error got into valid slot");
+			assert(cp.errors[2] == "C3", "Coroutine 3 error got into valid slot");
+		}
+	},
+
+	"CRTK-SRC-G-23":
+	function *(log, assert) {
+		log("Test: allIn waits for all awaitables in dictionary and puts errors by key");
+		var f1 = false, f2 = false, f3 = false;
+		var ch1 = start(function *() {
+				setTimeout(SYNC, 100); yield *SYNCW();
+				f1 = true;
+				throw "C1";
+			}),
+			ch2 = start(function *() {
+				setTimeout(SYNC, 250); yield *SYNCW();
+				f2 = true;
+				throw "C2";
+			}),
+			ch3 = start(function *() {
+				setTimeout(SYNC, 500); yield *SYNCW();
+				f3 = true;
+				throw "C3";
+			});
+		try {
+			Checkpoint.allIn({ a: ch2, b: ch1, c: ch3 }).await(SYNC), yield *SYNCW();
+			assert(false, "Throw expected");
+		} catch (cp) {
+			if (cp.isAssertionFailure) throw cp; // assersion, rethrow
+			assert(f1, "Coroutine 1 finished");
+			assert(f2, "Coroutine 2 finished");
+			assert(f3, "Coroutine 3 finished");
+			assert(cp.errors.a == "C2", "Coroutine 2 error got into valid slot");
+			assert(cp.errors.b == "C1", "Coroutine 1 error got into valid slot");
+			assert(cp.errors.c == "C3", "Coroutine 3 error got into valid slot");
+		}
+	},
+
+	"CRTK-SRC-G-24":
+	function *(log, assert) {
+		log("Test: anyIn waits for soonest awaitable in array and puts errors by key");
+		var f1 = false, f2 = false, f3 = false;
+		var ch1 = start(function *() {
+				setTimeout(SYNC, 100); yield *SYNCW();
+				f1 = true;
+				throw "C1";
+			}),
+			ch2 = start(function *() {
+				setTimeout(SYNC, 250); yield *SYNCW();
+				f2 = true;
+				throw "C2";
+			}),
+			ch3 = start(function *() {
+				setTimeout(SYNC, 500); yield *SYNCW();
+				f3 = true;
+				throw "C3";
+			});
+		var cp;
+		try {
+			Checkpoint.anyIn([ch2, ch1, ch3]).await(SYNC), yield *SYNCW();
+			assert(false, "Throw expected");
+		} catch (e) {
+			if (e.isAssertionFailure) throw e; // assersion, rethrow
+			cp = e;
+		}
+		assert(f1, "Coroutine 1 finished on anyOf");
+		assert(!f2, "Coroutine 2 not finished on anyOf");
+		assert(!f3, "Coroutine 3 not finished on anyOf");
+
+		try {
+			Checkpoint.allOf(ch1, ch2, ch3).await(SYNC), yield *SYNCW();
+		    assert(false, "Throw expected");
+		} catch (e) {
+			if (e.isAssertionFailure) throw e; // assersion, rethrow
+			assert(f1, "Coroutine 1 finished at all");
+			assert(f2, "Coroutine 2 finished at all");
+			assert(f3, "Coroutine 3 finished at all");
+		}
+
+		assert(typeof (cp.errors[0]) == "undefined", "Coroutine 2 error correctly dismissed");
+		assert(cp.errors[1] == "C1", "Coroutine 1 error got into valid slot");
+		assert(typeof (cp.errors[2]) == "undefined", "Coroutine 3 error correctly dismissed");
+	},
+
+	"CRTK-SRC-G-25":
+	function *(log, assert) {
+		log("Test: anyIn waits for soonest awaitable in dictionary and puts errors by key");
+		var f1 = false, f2 = false, f3 = false;
+		var ch1 = start(function *() {
+				setTimeout(SYNC, 100); yield *SYNCW();
+				f1 = true;
+				throw "C1";
+			}),
+			ch2 = start(function *() {
+				setTimeout(SYNC, 250); yield *SYNCW();
+				f2 = true;
+				throw "C2";
+			}),
+			ch3 = start(function *() {
+				setTimeout(SYNC, 500); yield *SYNCW();
+				f3 = true;
+				throw "C3";
+			});
+		var cp;
+		try {
+			Checkpoint.anyIn({ a: ch2, b: ch1, c: ch3 }).await(SYNC), yield *SYNCW();
+			assert(false, "Throw expected");
+		} catch (e) {
+			if (e.isAssertionFailure) throw e; // assersion, rethrow
+			assert(f1, "Coroutine 1 finished on anyOf");
+			assert(!f2, "Coroutine 2 not finished on anyOf");
+			assert(!f3, "Coroutine 3 not finished on anyOf");
+			cp = e;
+		}
+
+		try {
+			Checkpoint.allOf(ch1, ch2, ch3).await(SYNC), yield *SYNCW();
+		    assert(false, "Throw expected");
+		} catch (e) {
+			if (e.isAssertionFailure) throw e; // assersion, rethrow
+			assert(f1, "Coroutine 1 finished at all");
+			assert(f2, "Coroutine 2 finished at all");
+			assert(f3, "Coroutine 3 finished at all");
+		}
+
+		assert(typeof (cp.errors.a) == "undefined", "Coroutine 2 result correctly dismissed");
+		assert(cp.errors.b == "C1", "Coroutine 1 result got into valid slot");
+		assert(typeof (cp.errors.c) == "undefined", "Coroutine 3 result correctly dismissed");
+	},
+
 	//
 	// Promise interaction
 	//
@@ -1043,7 +1404,6 @@ var testCases = {
 				var nt = NowThen();
 				var result = await (function(callback) {
 					setTimeout(function() {
-						console.log("OK");
 						callback(100);
 					}, 1);
 				} (nt.SYNCTL), nt.SYNCW);
@@ -1054,6 +1414,136 @@ var testCases = {
 		c.await(SYNC), yield *SYNCW();
 		assert(t, "The coroutine successfully progressed via nt.SYNCTL/SYNCW");
 		assert(c.result == 100, "Valid value was passed to nt.SYNCTL");
+	},
+
+	"CRTK-SRC-I-4":
+	function *(log, assert) {
+		log("Test: NowThen timeslice feature works in generator coroutine");
+		var failed = false, c = start(function *() {
+			var nt = NowThen(),
+				startAt = new Date().getTime(),
+				lastYieldAt = startAt;
+			for (; new Date().getTime() - startAt < 500;) {
+				if (nt.timesliceUsedUp(10)) {
+					nt.timesliceYield.await(SYNC), yield *SYNCW();
+					lastYieldAt = new Date().getTime();
+				}
+
+				// OS scheduler break-in can add up to OS timeslice lag,
+				// so making a reservation up to 100 ms
+				if (new Date().getTime() - lastYieldAt > 110) {
+					// timeslice detection wasn't properly detected,
+					// or didn't properly yield in time
+					failed = true;
+					return;
+				}
+			}
+		});
+
+		c.await(SYNC), yield *SYNCW();
+		assert(!failed, "Timeslice detected and yielded properly");
+	},
+
+	"CRTK-SRC-I-5":
+	function *(log, assert) {
+		log("Test: NowThen timeslice feature works in async func coroutine");
+		var failed = false, c = start(async function () {
+			var nt = NowThen(),
+				startAt = new Date().getTime(),
+				lastYieldAt = startAt;
+			for (; new Date().getTime() - startAt < 500;) {
+				if (nt.timesliceUsedUp(10)) {
+					await(nt.timesliceYield);
+					lastYieldAt = new Date().getTime();
+				}
+
+				// OS scheduler break-in can add up to OS timeslice lag,
+				// so making a reservation up to 100 ms
+				if (new Date().getTime() - lastYieldAt > 110) {
+					// timeslice detection wasn't properly detected,
+					// or didn't properly yield in time
+					failed = true;
+					return;
+				}
+			}
+		});
+
+		c.await(SYNC), yield *SYNCW();
+		assert(!failed, "Timeslice detected and yielded properly");
+	},
+
+	"CRTK-SRC-I-6":
+	function *(log, assert) {
+		log("Test: NowThen TRY/aft/CATCH/FINALLY basic functionality");
+
+		var nt = NowThen(), ag = new Array();
+		nt.aft(() => ag.push("1"));
+
+		try {
+			nt.TRY;
+			nt.aft(() => ag.push("2"));
+			nt.aft(() => ag.push("3"));
+
+			ag.push("4");
+
+			for (var i = 0; i < 3; i++) {
+				try {
+					nt.TRY;
+					nt.aft(() => ag.push("5"));
+					ag.push("6");
+					if (i == 1) throw "e";
+				} finally {
+					nt.FINALLY;
+				}
+			}
+		} catch (e) {
+			nt.CATCH;
+			nt.aft(() => ag.push("7"));
+
+			ag.push("8");
+		} finally {
+			nt.FINALLY;
+		}
+
+		ag.push("9");
+		nt.FINALLY;
+
+		assert(ag[0] == "4" &&
+			ag[1] == "6" &&
+			ag[2] == "5" &&
+			ag[3] == "6" &&
+			ag[4] == "5" &&
+			ag[5] == "3" &&
+			ag[6] == "2" &&
+			ag[7] == "8" &&
+			ag[8] == "7" &&
+			ag[9] == "9" &&
+			ag[10] == "1",
+			"Valid agenda order");
+	},
+
+	"CRTK-SRC-I-7":
+	function *(log, assert) {
+		log("Test: NowThen TRY/aft/CATCH/FINALLY - leaking exception from dtor");
+
+		var nt = NowThen(), ok = false;
+
+		try {
+			nt.TRY;
+			try {
+				nt.aft(() => { throw "e"; });
+			} finally {
+				nt.FINALLY;
+			}
+
+			assert(false, "Expected non-suppressed exception");
+		} catch (e) {
+			nt.FINALLY;
+			assert(e == "e", "The expected exception is caught");
+			ok = true;
+		}
+
+		assert(ok, "Test passed");
 	},
 
 	//
@@ -1141,6 +1631,111 @@ var testCases = {
 		}
 	},
 
+	"CRTK-SRC-J-8":
+	function *(log, assert) {
+		log("Test: Checkpoint.allIn doesn't accept no-arg, non-array/dict or extra arg");
+		try {
+			Checkpoint.allIn();
+			assert(false, "An error must be raised for no-arg");
+		} catch (e) {
+			assert(true, "The error raised correctly for no-arg");
+		}
+
+		try {
+			Checkpoint.allIn("stuff");
+			assert(false, "An error must be raised for non-array/dict");
+		} catch (e) {
+			assert(true, "The error raised correctly for non-array/dict");
+		}
+
+		try {
+			Checkpoint.allIn([], 0);
+			assert(false, "An error must be raised for extra arg");
+		} catch (e) {
+			assert(true, "The error raised correctly for extra arg");
+		}
+
+		try {
+			Checkpoint.allIn([]).await(SYNC), yield *SYNCW();
+			assert(true, "An error must not be raised for array");
+		} catch (e) {
+			assert(false, "The error raised incorrectly for array");
+		}
+
+		try {
+			Checkpoint.allIn({}).await(SYNC), yield *SYNCW();
+			assert(true, "An error must not be raised for dict");
+		} catch (e) {
+			assert(false, "The error raised incorrectly for dict");
+		}
+	},
+
+	"CRTK-SRC-J-9":
+	function *(log, assert) {
+		log("Test: Checkpoint.anyIn doesn't accept no-arg, non-array/dict or extra arg");
+		try {
+			Checkpoint.anyIn();
+			assert(false, "An error must be raised for no-arg");
+		} catch (e) {
+			assert(true, "The error raised correctly for no-arg");
+		}
+
+		try {
+			Checkpoint.anyIn("stuff");
+			assert(false, "An error must be raised for non-array/dict");
+		} catch (e) {
+			assert(true, "The error raised correctly for non-array/dict");
+		}
+
+		try {
+			Checkpoint.anyIn([], 0);
+			assert(false, "An error must be raised for extra arg");
+		} catch (e) {
+			assert(true, "The error raised correctly for extra arg");
+		}
+
+		try {
+			Checkpoint.anyOf();
+			Checkpoint.anyIn([]).await(SYNC), yield *SYNCW();
+			assert(true, "An error must not be raised for array");
+		} catch (e) {
+			console.log(e);
+			assert(false, "The error raised incorrectly for array");
+		}
+
+		try {
+			Checkpoint.anyIn({}).await(SYNC), yield *SYNCW();
+			assert(true, "An error must not be raised for dict");
+		} catch (e) {
+			assert(false, "The error raised incorrectly for dict");
+		}
+	},
+
+	"CRTK-SRC-J-10":
+	function *(log, assert) {
+		log("Test: new Cancellation() is not allowed");
+		try {
+			new Cancellation();
+			assert(false, "An error must be raised");
+		} catch (e) {
+			assert(true, "The error raised correctly");
+		}
+	},
+
+	"CRTK-SRC-J-11":
+	function *(log, assert) {
+		log("Test: NowThen.aft only accepts functions");
+		var nt = NowThen();
+		try {
+			nt.TRY;
+			nt.aft("stuff");
+			assert(false, "An error must be raised");
+		} catch (e) {
+			nt.FINALLY;
+			assert(true, "The error raised correctly");
+		}
+	},
+
 	//
 	// issues
 	//
@@ -1203,6 +1798,342 @@ var testCases = {
 		var cp = Checkpoint.allOf();
 		assert(cp.done, "The .done is set correctly");
 	},
+
+	"CRTK-ISSUES-6":
+	function *(log, assert) {
+		log("Test: All ways of starting a coroutine work correctly, and coroutines return correctly");
+		var cr, val, obj, thisCap, argsCap;
+
+		// start with generator
+		cr = start(function *(...args) {
+			argsCap = args;
+			setTimeout(SYNC, 10), yield *SYNCW();
+			return 1;
+		}, 2, 3);
+		val = (cr.await(SYNC), yield *SYNCW());
+		assert(val == 1, "coroutine started with generator returned expected value");
+		assert(argsCap[0] == 2 && argsCap[1] == 3,
+			"coroutine started with generator got expected arguments");
+
+		// start method with generator
+		cr = (obj = {
+			m: function *(...args) {
+				thisCap = this;
+				argsCap = args;
+				setTimeout(SYNC, 10), yield *SYNCW();
+				return 101;
+			}
+		})[startMethod]("m", 102, 103);
+		val = (cr.await(SYNC), yield *SYNCW());
+		assert(val == 101, "coroutine method started with generator threw expected value");
+		assert(argsCap[0] == 102 && argsCap[1] == 103,
+			"coroutine method started with generator got expected arguments");
+		assert(thisCap === obj,
+			"coroutine method started with generator got expected this");
+		obj = null;
+
+		// start with plain function
+		cr = start(function (...args) {
+			argsCap = args;
+			return 201;
+		}, 202, 203);
+		val = (cr.await(SYNC), yield *SYNCW());
+		assert(val == 201, "coroutine started with plain function returned expected value");
+		assert(argsCap[0] == 202 && argsCap[1] == 203,
+			"coroutine started with plain function got expected arguments");
+
+		// start method with plain function
+		cr = (obj = {
+			m: function (...args) {
+				thisCap = this;
+				argsCap = args;
+				return 301;
+			}
+		})[startMethod]("m", 302, 303);
+		val = (cr.await(SYNC), yield *SYNCW());
+		assert(val == 301, "coroutine method started with plain function returned expected value");
+		assert(argsCap[0] == 302 && argsCap[1] == 303,
+			"coroutine method started with plain function got expected arguments");
+		assert(thisCap === obj,
+			"coroutine method started with plain function got expected this");
+		obj = null;
+
+		// start with async function
+		cr = start(async function (...args) {
+			var nt = NowThen();
+			argsCap = args;
+			await(setTimeout(nt.SYNC, 10), nt.SYNCW);
+			return 401;
+		}, 402, 403);
+		val = (cr.await(SYNC), yield *SYNCW());
+		assert(val == 401, "coroutine started with async function returned expected value");
+		assert(argsCap[0] == 402 && argsCap[1] == 403,
+			"coroutine started with generator got expected arguments");
+
+		// start method with async function
+		cr = (obj = {
+			m: async function (...args) {
+				var nt = NowThen();
+				thisCap = this;
+				argsCap = args;
+				await(setTimeout(nt.SYNC, 10), nt.SYNCW);
+				return 501;
+			}
+		})[startMethod]("m", 502, 503);
+		val = (cr.await(SYNC), yield *SYNCW());
+		assert(val == 501, "coroutine method started with async function returned expected value");
+		assert(argsCap[0] == 502 && argsCap[1] == 503,
+			"coroutine method started with async function got expected arguments");
+		assert(thisCap === obj,
+			"coroutine method started with async function got expected this");
+		obj = null;
+
+		// start with iterator
+		cr = start(function *(...args) {
+			argsCap = args;
+			setTimeout(SYNC, 10), yield *SYNCW();
+			return 601;
+		}(602, 603));
+		val = (cr.await(SYNC), yield *SYNCW());
+		assert(val == 601, "coroutine started with iterator returned expected value");
+		assert(argsCap[0] == 602 && argsCap[1] == 603,
+			"coroutine started with iterator got expected arguments");
+
+		// start method with iterator
+		cr = start((obj = {
+			m: function *(...args) {
+				thisCap = this;
+				argsCap = args;
+				setTimeout(SYNC, 10), yield *SYNCW();
+				return 701;
+			}
+		}).m(702, 703));
+		val = (cr.await(SYNC), yield *SYNCW());
+		assert(val == 701, "coroutine method started with iterator returned expected value");
+		assert(argsCap[0] == 702 && argsCap[1] == 703,
+			"coroutine method started with iterator got expected arguments");
+		assert(thisCap === obj,
+			"coroutine method started with iterator got expected this");
+		obj = null;
+
+		// start with promise
+		cr = start(async function (...args) {
+			var nt = NowThen();
+			argsCap = args;
+			await(setTimeout(nt.SYNC, 10), nt.SYNCW);
+			return 801;
+		}(802, 803));
+		val = (cr.await(SYNC), yield *SYNCW());
+		assert(val == 801, "coroutine started with promise returned expected value");
+		assert(argsCap[0] == 802 && argsCap[1] == 803,
+			"coroutine started with promise got expected arguments");
+
+		// start method with promise
+		cr = start ((obj = {
+			m: async function (...args) {
+				var nt = NowThen();
+				thisCap = this;
+				argsCap = args;
+				await(setTimeout(nt.SYNC, 10), nt.SYNCW);
+				return 901;
+			}
+		}).m(902, 903));
+		val = (cr.await(SYNC), yield *SYNCW());
+		assert(val == 901, "coroutine method started with promise returned expected value");
+		assert(argsCap[0] == 902 && argsCap[1] == 903,
+			"coroutine method started with promise got expected arguments");
+		assert(thisCap === obj,
+			"coroutine method started with promise got expected this");
+		obj = null;
+	},
+
+	"CRTK-ISSUES-6-1":
+	function *(log, assert) {
+		log("Test: All ways of starting a coroutine work correctly, and coroutines throw correctly");
+		var cr, val = null, obj, thisCap, argsCap;
+
+		// start with generator
+		cr = start(function *(...args) {
+			argsCap = args;
+			setTimeout(SYNC, 10), yield *SYNCW();
+			throw 1;
+		}, 2, 3);
+		try {
+			cr.await(SYNC), yield *SYNCW();
+		} catch (e) {
+			val = e;
+		}
+		assert(val == 1, "coroutine started with generator threw expected value");
+		assert(argsCap[0] == 2 && argsCap[1] == 3,
+			"coroutine started with generator got expected arguments");
+
+		// start method with generator
+		cr = (obj = {
+			m: function *(...args) {
+				thisCap = this;
+				argsCap = args;
+				setTimeout(SYNC, 10), yield *SYNCW();
+				throw 101;
+			}
+		})[startMethod]("m", 102, 103);
+		try {
+			cr.await(SYNC), yield *SYNCW();
+		} catch (e) {
+			val = e;
+		}
+		assert(val == 101, "coroutine method started with generator threw expected value");
+		assert(argsCap[0] == 102 && argsCap[1] == 103,
+			"coroutine method started with generator got expected arguments");
+		assert(thisCap === obj,
+			"coroutine method started with generator got expected this");
+		obj = null;
+
+		// start with plain function
+		cr = start(function (...args) {
+			argsCap = args;
+			throw 201;
+		}, 202, 203);
+		try {
+			cr.await(SYNC), yield *SYNCW();
+		} catch (e) {
+			val = e;
+		}
+		assert(val == 201, "coroutine started with plain function threw expected value");
+		assert(argsCap[0] == 202 && argsCap[1] == 203,
+			"coroutine started with plain function got expected arguments");
+
+		// start method with plain function
+		cr = (obj = {
+			m: function (...args) {
+				thisCap = this;
+				argsCap = args;
+				throw 301;
+			}
+		})[startMethod]("m", 302, 303);
+		try {
+			cr.await(SYNC), yield *SYNCW();
+		} catch (e) {
+			val = e;
+		}
+		assert(val == 301, "coroutine method started with plain function threw expected value");
+		assert(argsCap[0] == 302 && argsCap[1] == 303,
+			"coroutine method started with plain function got expected arguments");
+		assert(thisCap === obj,
+			"coroutine method started with plain function got expected this");
+		obj = null;
+
+		// start with async function
+		cr = start(async function (...args) {
+			var nt = NowThen();
+			argsCap = args;
+			await(setTimeout(nt.SYNC, 10), nt.SYNCW);
+			throw 401;
+		}, 402, 403);
+		try {
+			cr.await(SYNC), yield *SYNCW();
+		} catch (e) {
+			val = e;
+		}
+		assert(val == 401, "coroutine started with async function threw expected value");
+		assert(argsCap[0] == 402 && argsCap[1] == 403,
+			"coroutine started with generator got expected arguments");
+
+		// start method with async function
+		cr = (obj = {
+			m: async function (...args) {
+				var nt = NowThen();
+				thisCap = this;
+				argsCap = args;
+				await(setTimeout(nt.SYNC, 10), nt.SYNCW);
+				throw 501;
+			}
+		})[startMethod]("m", 502, 503);
+		try {
+			cr.await(SYNC), yield *SYNCW();
+		} catch (e) {
+			val = e;
+		}
+		assert(val == 501, "coroutine method started with async function threw expected value");
+		assert(argsCap[0] == 502 && argsCap[1] == 503,
+			"coroutine method started with async function got expected arguments");
+		assert(thisCap === obj,
+			"coroutine method started with async function got expected this");
+		obj = null;
+
+		// start with iterator
+		cr = start(function *(...args) {
+			argsCap = args;
+			setTimeout(SYNC, 10), yield *SYNCW();
+			throw 601;
+		}(602, 603));
+		try {
+			cr.await(SYNC), yield *SYNCW();
+		} catch (e) {
+			val = e;
+		}
+		assert(val == 601, "coroutine started with iterator threw expected value");
+		assert(argsCap[0] == 602 && argsCap[1] == 603,
+			"coroutine started with iterator got expected arguments");
+
+		// start method with iterator
+		cr = start((obj = {
+			m: function *(...args) {
+				thisCap = this;
+				argsCap = args;
+				setTimeout(SYNC, 10), yield *SYNCW();
+				throw 701;
+			}
+		}).m(702, 703));
+		try {
+			cr.await(SYNC), yield *SYNCW();
+		} catch (e) {
+			val = e;
+		}
+		assert(val == 701, "coroutine method started with iterator threw expected value");
+		assert(argsCap[0] == 702 && argsCap[1] == 703,
+			"coroutine method started with iterator got expected arguments");
+		assert(thisCap === obj,
+			"coroutine method started with iterator got expected this");
+		obj = null;
+
+		// start with promise
+		cr = start(async function (...args) {
+			var nt = NowThen();
+			argsCap = args;
+			await(setTimeout(nt.SYNC, 10), nt.SYNCW);
+			throw 801;
+		}(802, 803));
+		try {
+			cr.await(SYNC), yield *SYNCW();
+		} catch (e) {
+			val = e;
+		}
+		assert(val == 801, "coroutine started with promise threw expected value");
+		assert(argsCap[0] == 802 && argsCap[1] == 803,
+			"coroutine started with promise got expected arguments");
+
+		// start method with promise
+		cr = start ((obj = {
+			m: async function (...args) {
+				var nt = NowThen();
+				thisCap = this;
+				argsCap = args;
+				await(setTimeout(nt.SYNC, 10), nt.SYNCW);
+				throw 901;
+			}
+		}).m(902, 903));
+		try {
+			cr.await(SYNC), yield *SYNCW();
+		} catch (e) {
+			val = e;
+		}
+		assert(val == 901, "coroutine method started with promise threw expected value");
+		assert(argsCap[0] == 902 && argsCap[1] == 903,
+			"coroutine method started with promise got expected arguments");
+		assert(thisCap === obj,
+			"coroutine method started with promise got expected this");
+		obj = null;
+	},
 };
 
 //
@@ -1227,7 +2158,9 @@ start(function *() {
 				assert = function(flag, description) {
 					if(!flag) {
 						log(`Assertion failed - ${description}`);
-						throw new Error(`Assertion failed - ${description}`);
+						var error = new Error(`Assertion failed - ${description}`);
+						error.isAssertionFailure = true;
+						throw error;
 					} else {
 						log(`Assertion passed - ${description}`);
 					}

@@ -1,4 +1,4 @@
-[![coverage-97%](https://img.shields.io/badge/coverage-97%25-brightgreen.svg?style=flat)](https://codecov.io/gh/sbtrn-devil/crtk)
+[![coverage-98%](https://img.shields.io/badge/coverage-98%25-brightgreen.svg?style=flat)](https://codecov.io/gh/sbtrn-devil/crtk)
 
 # crtk
 
@@ -90,7 +90,8 @@ function *myCoroutine() {
 }
 
 // if we want coroutine to do something, we need to launch it
-start(myCoroutine);
+start(myCoroutine());
+// start(myCoroutine); is allowed too
 ```
 
 Couple of details to explain here:
@@ -111,18 +112,14 @@ function *coroutineWithParameter(x) {
   // ditch the failure handling this time for brevity
 }
 
-start(coroutineWithParameter, 100);
+start(coroutineWithParameter(100));
 ```
 
 ### Method coroutines
 
-Coroutine generator can be a method. In this case you start it using `startMethod` helper:
+Coroutine generator can be a method.
 
 ```js
-const {
-  startMethod,
-} = require("crtk");
-
 var anObject = {
   x: 100500,
   method: function *method(z) {
@@ -131,8 +128,7 @@ var anObject = {
   }
 };
 
-// in crtk Object prototype gets a hidden method denoted by startMethod Symbol
-anObject[startMethod]("method", 100);
+start(anObject.method(100));
 ```
 
 ### Nested calls
@@ -157,7 +153,7 @@ Multiple coroutines can be started and work in parallel.
 
 ```js
 for (var i = 0; i < 10; i++) {
-  start(coroutineWithParameter, i);
+  start(coroutineWithParameter(i));
 }
 ```
 
@@ -171,7 +167,7 @@ function *inferiorCoroutine(x) {
 
 function *superiorCoroutine(x) {
   for (var i = 0; i < 10; i++) {
-    start(inferiorCoroutine, i);
+    start(inferiorCoroutine(i));
   }
 
   // our own piece of work while they are slaving away
@@ -229,11 +225,11 @@ function *calculateValuableFunctionAsCRTN(x) {
 }
 ```
 
-In order to make use of it, we notice the object returned by `start` function (or `[startMethod]` method): it is the _coroutine handle_ with some useful stuff, of which we need `await` method:
+In order to make use of it, we notice the object returned by `start` function: it is the _coroutine handle_ with some useful stuff, of which we need `await` method:
 
 ```js
-var crtn = start(calculateValuableFunctionAsCRTN, 100);
-// looks familiar, doesn't it?
+var crtn = start(calculateValuableFunctionAsCRTN(100));
+// the code below looks familiar, doesn't it?
 crtn.await(function(err, result) {
   if (err) {
     console.log(`calculateValuableFunctionAsCRTN thrown an error: ${err}`);
@@ -295,7 +291,7 @@ function *superiorCoroutine() {
 
 ### So, what's about node 7+ and async/await?
 
-Remember the example from introduction? `crtk` (1.3.0+) can help you with that:
+Remember the example from introduction? `crtk` (1.3+) can help you with that:
 
 ```js
 const {
@@ -349,11 +345,11 @@ function *anotherCoroutine() {
 }
 ```
 
-So the `crtk` - `async` / `await` / `Promise` interop is full two-way, you can mix them for any convenience and leverage the good parts of both.
+So the `crtk` <-> `async` / `await` / `Promise` interop is full two-way, you can mix them for any convenience and leverage the good parts of both.
 
 ## Command line runner
 
-Since 1.1.0 `crtk` comes with helper `crtk-run` that allows to run functions/generators (since 1.3.0, async functions too) exported from .js files as `crtk`-flavored coroutines directly from command line, which allows to save time when writing quick scripts that use asynchronous APIs. More info [here][link-docs-crtk-run].
+Since 1.1.0 `crtk` comes with helper `crtk-run` that allows to run functions/generators (since 1.3, async functions too) exported from .js files as `crtk`-flavored coroutines directly from command line, which allows to save time when writing quick scripts that use asynchronous APIs. More info [here][link-docs-crtk-run].
 
 ## Further reading
 

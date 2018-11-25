@@ -37,11 +37,11 @@ Read-only property that is `false` when an operation is still running or `true` 
 
 Sets to `true` just before a notification callback is called, therefore is always seen as `true` from callbacks code.
 
-## 'Promise-ish': _interface_ (since 1.3.0)
+## 'Promise-ish': _interface_ (since 1.3)
 
 This interface is compatible with that of ES native `Promise` to a degree enough that the implementing object can be used with ES2017 `await` statement.
 
-`'Promise-ish'` object also works in other basic `Promise` use cases (`Promise.all`, `Promise.resolve` etc.), but its primary purpose in `crtk` is to bridge the implementing objects to `await`, so other uses are not a goal.
+`'Promise-ish'` object also works in other basic `Promise` use cases (`Promise.all`, `Promise.resolve` etc.), but its primary purpose in `crtk` is to bridge the implementing objects to `await` statement, so other uses are not a goal.
 
 ### .then(resultCallback, errorCallback): _method_
 
@@ -77,6 +77,8 @@ Second, whatever the cancel means, the requirement is to not prevent the `'Await
 Cancel request may come with an attached cancellation message, specified by the canceler in `cancelMsg` argument. Use and meaning of this parameter are up to the implementor.
 
 ## start(mainFunction, ...args): _function: 'CoroutineHandle'_
+
+*NOTE*: since 1.4 there exists more convenient form of this function for generator based and `async` function based coroutines - see `start(mainIteratorOrPromise)`.
 
 - `mainFunction`: _generator_, _function_ or _async function_ - the coroutine main function
 - `args`: list of _any_ - arguments to pass to the coroutine main function
@@ -161,6 +163,8 @@ const startMethod = require("crtk").startMethod;
 
 ### Object[startMethod] (methodId, ...args): _method: 'CoroutineHandle'_
 
+*NOTE*: since 1.4 there exists more convenient form of this function for generator-method based and `async` function-method based coroutines - see `start(mainIteratorOrPromise)`.
+
 - `methodId`: _string_ or _Symbol_ - id of the method
 - `args`: list of _any_ - parameters to pass to the method
 - return: handle of the started coroutine
@@ -179,6 +183,35 @@ anObject[startMethod]("someMethod", p1, p2, ...whateverElse);
 ```
 
 The `object[startMethod]` method works exactly the same as `start` function, except that the `someMethod` will be called in context of `this == object`.
+
+## start(mainIteratorOrPromise): _function: 'CoroutineHandle'_ (since 1.4)
+
+- `mainIteratorOrPromise`: _iterator_ or _Promise_ - an iterator created by calling a coroutine generator, or a `Promise` created by calling an `async` function
+
+This version of `start` allows to write launch of a coroutine in more natural manner:
+
+```js
+function *generatorBasedMain(a, b, c) { ... }
+start(generatorBasedMain(1, 2, 3));
+// ^same as start(generatorBasedMain, 1, 2, 3)
+
+async function asyncBasedMain(a, b, c) { ... }
+start(asyncBasedMain(1, 2, 3));
+// ^same as start(asyncBasedMain, 1, 2, 3)
+
+var obj = {
+    generatorMethodBasedMain: function *(a, b, c) { ... },
+    asyncMethodBasedMain: function *(a, b, c) { ... }
+};
+
+start(obj.generatorMethodBasedMain(1, 2, 3));
+// ^same as obj[startMethod]("generatorMethodBasedMain", 1, 2, 3)
+start(obj.asyncMethodBasedMain(1, 2, 3));
+// ^same as obj[startMethod]("asyncMethodBasedMain", 1, 2, 3)
+
+```
+
+Alas, no similar convenience is possible for plain function/method based coroutines.
 
 ## "Magic" pseudo-global variables
 
@@ -462,7 +495,7 @@ function *trackClicksFor1Sec(clickable) {
 
 - implements: `'Awaitable'`
 - implements: `'Cancellable'`
-- implements: `'Promise-ish'` (since 1.3.0)
+- implements: `'Promise-ish'` (since 1.3)
 
 When you start a coroutine via `start` or `startMethod` helpers (see below), value returned by them is an instance of `CoroutineHandle`. This object allows to keep track and sync on coroutine, and to obtain results on its completion. Coroutine (and the `'Awaitable'` it implements) is completed when control flow exits its starting function (returned or thrown).
 
@@ -540,7 +573,7 @@ function *longOperationWithProgressReport() {
 }
 ```
 
-To ease differing events from each other, each event is associated with a certain "event channel" identified by some string (the channel ID). There can be listener callbacks subscribed on this channel (see `.on` and `.once`), and every time the event is emitted on this channel they are invoked (on next soonest asynchronous occasion). Unlike with `Awaitable`-s, the events are not persistent: if a listener was not subscribed by time the event is emitted, it won't get it.
+To ease differing events from each other, each event is associated with a certain "event channel" identified by some string (the channel ID). There can be listener callbacks subscribed on this channel (see `.on` and `.once`), and every time the event is emitted on this channel they are invoked (on next soonest asynchronous occasion). Unlike with `'Awaitable'`-s, the events are not persistent: if a listener was not subscribed by time the event is emitted, it won't get it.
 
 No order of calling the listeners is guaranteed, so don't rely on any assumption of their ordering.
 
@@ -630,6 +663,8 @@ An instance of `Cancellation` is thrown in the coroutine from `yield *SYNCW()` a
 
 `Cancellation` as a value can be checked against by `instanceof` expression to check if an object is an instance of `Cancellation`.
 
+*NOTE*: prior to `crtk` 1.4, `instanceof Cancellation` was only guaranteed to work properly on coroutines started in the same module that does the check.
+
 ```js
 const Cancellation = require("crtk").Cancellation;
 
@@ -645,7 +680,7 @@ function *test() {
 }
 ```
 
-Manual construction and throwing of `Cancellation` is not recommended, in order to ensure consistent 'catching `Cancellation` means that current coroutine is canceled' convention. For the same reason, if you are `.await`-ing on a coroutine that ends by throwing `Cancellation`, a wrapper `Error` is thrown into the awaiter's flow instead of the original `Cancellation`: unhandled cancellation of the awaited coroutine is abnormal result, but it isn't cancellation of the awaiter. However, the original `Cancellation` will still be accessible via `'CoroutineHandle'.error` (and this is the only allowed case for its `.error` to be different from value delivered to `.await`-ing callbacks).
+Manual construction and throwing of `Cancellation` is intentionally prohibited, in order to ensure consistent 'catching `Cancellation` means that current coroutine is canceled' convention. For the same reason, if you are `.await`-ing on a coroutine that ends by throwing `Cancellation`, a wrapper `Error` is thrown into the awaiter's flow instead of the original `Cancellation`: unhandled cancellation of the awaited coroutine is abnormal result, but it isn't cancellation of the awaiter. However, the original `Cancellation` will still be accessible via `'CoroutineHandle'.error` (and this is the only allowed case for its `.error` to be different from value delivered to `.await`-ing callbacks).
 
 Note: if your coroutine catches `Cancellation`, then won't rethrow it and will finish gracefully without attempting any more `yield *SYNCW()`-s, it will be considered a normal return.
 
@@ -664,9 +699,9 @@ Converts the `Cancellation` to string. Similarly to `Error`, the string is "Canc
 ## Awaiter: _class_
 
 - implements: `'Awaitable'`
-- implements: `'Promise-ish'` (since 1.3.0)
+- implements: `'Promise-ish'` (since 1.3)
 
-`Awaiter` is designed as an adapter from callback-based asynchronous result providers to `Awaitable`. On one hand, it is a function of `(err, result)` signature that can be used as a callback to accept some asynchronous result. On another hand, it stores the result and is `Awaitable` that reflects its obtainment.
+`Awaiter` is designed as an adapter from callback-based asynchronous result providers to `'Awaitable'`. On one hand, it is a function of `(err, result)` signature that can be used as a callback to accept some asynchronous result. On another hand, it stores the result and is `'Awaitable'` that reflects its obtainment.
 
 ```js
 const {
@@ -717,16 +752,16 @@ After `Awaiter` is `.done == true` and the result was a normal result, `.result`
 
 ## Checkpoint: _namespace Object_
 
-A checkpoint is synchronization tool to address problems like "wait until all of these parallel jobs complete, and then..." It allows to synchronize on group of `Awaitable`-s, which can be coroutines, `Awaiter`-s, custom `Awaitable`-s, or even other checkpoints.
+A checkpoint is synchronization tool to address problems like "wait until all of these parallel jobs complete, and then..." It allows to synchronize on group of `'Awaitable'`-s, which can be coroutines, `Awaiter`-s, custom `'Awaitable'`-s, or even other checkpoints. Since 1.4, iterators and `Promise` are allowed too (for purposes of call notation convenience) - they'll be wrapped into `'Awaitable'`-s automatically.
 
 ### .allOf(...awaitables): _function: 'CheckpointInstance'_
 
-- `awaitables`: list of _Awaitable_ or _Array_
+- `awaitables`: list of _'Awaitable'_ (since 1.4 - or _Promise_, or _iterator_) or _Array_
 - return: handle of the created checkpoint instance
 
-"Static" method that creates and returns a `'CheckpointInstance'` object (see below) configured to wait until _all_ of the provided awaitables finish. Each element of `awaitables` must be either an `Awaitable` or an array, where each element is either an `Awaitable` or an array, where each element is... etc.
+"Static" method that creates and returns a `'CheckpointInstance'` object (see below) configured to wait until _all_ of the provided awaitables finish. Each element of `awaitables` must be either an `'Awaitable'` or an array, where each element is either an `'Awaitable'` or an array, where each element is... etc.
 
-In order for `'CheckpointInstance'` to be a consistent `Awaitable`, the set of awaitables the checkpoint waits on is fixed on creation and can't be changed later.
+In order for `'CheckpointInstance'` to be a consistent `'Awaitable'`, the set of awaitables the checkpoint waits on is fixed on creation and can't be changed later.
 
 ```js
 function *test() {
@@ -750,11 +785,49 @@ var
 }
 ```
 
+`Promise`-s and iterators are assumed to be ones started from an `async` functions and coroutine generators, respectively - they are automatically wrapped into the assumed `'Awaitable'`-s. It allows a less verbose notation for a parallel call:
+
+```js
+function *asyncDownload(url) { ... }
+async function asyncCheckEmail(email) { ... }
+
+var results = Checkpoint.allOf(
+  asyncDownload("http://google.com"),
+  asyncDownload("http://www.npmjs.com"),
+  asyncDownload("http://github.com"),
+  asyncCheckEmail("anonymous@email.net")
+).await(SYNC), yield *SYNCW();
+
+// or, if you are writing an async function, even as short as
+// var results = await Checkpoint.allOf(...);
+```
+
 If no awaitables are provided, the checkpoint is considered finished right away.
+
+### .allIn(awaitables): _function: 'CheckpointInstance'_ (since 1.4)
+
+- `awaitables`: _Array_ or _Dictionary_ (of _'Awaitable'_, _Promise_, _iterator_) or _Array_ - array or associative array of awaitable objects
+- return: handle of the created checkpoint instance
+
+A version of `.allOf` that arranges results or errors as an ordered array/dictionary. A result or an error of an `'Awaitable'` will be put under the same key/index in the `.results` or `.errors` (see below) as the `'Awaitable'` was in the `awaitables` array/dictionary.
+
+```js
+var resultsAsArray = Checkpoint.allIn([
+  asyncGet(ValueA),
+  asyncGet(ValueB)
+]).await(SYNC), yield *SYNCW();
+// resultsAsArray.results = [ result_of_ValueA, result_of_ValueB ]
+
+var resultsAsDictionary = Checkpoint.allIn({
+  a: asyncGet(ValueA),
+  b: asyncGet(ValueB)
+}).await(SYNC), yield *SYNCW();
+// resultsAsDictionary.results = { a: result_of_ValueA, b: result_of_ValueB }
+```
 
 ### .anyOf(...awaitables): _function: 'CheckpointInstance'_
 
-- `awaitables`: list of _Awaitable_ or _Array_
+- `awaitables`: list of _'Awaitable'_ (since 1.4 - or _Promise_, or _iterator_) or _Array_
 - return: handle of the created checkpoint instance
 
 "Static" method that returns a `'CheckpointInstance'` object configured to wait until _any one_ of the provided awaitables finish. All the other considerations are the same as for `.allOf`.
@@ -778,15 +851,43 @@ function *doItWithTimeout(x) {
 
 If no awaitables are provided, the checkpoint is considered finished right away.
 
-Note that if checkpoint finishes before all of its `Awaitable`-s finish, its results are sealed, and activity and outcomes of remaining `Awaitable`-s can no longer affect it. This strategy holds for all cases of early finish, including "stop on first error" mode (see `'CheckpointInstance'.stopOnFirstError`).
+Note that if checkpoint finishes before all of its `'Awaitable'`-s finish, its results are sealed, and activity and outcomes of remaining `'Awaitable'`-s can no longer affect it. This strategy holds for all cases of early finish, including "stop on first error" mode (see `'CheckpointInstance'.stopOnFirstError`).
 
 `.anyOf` checkpoint type makes use of `'Awaitable'.unawait` methods (where awailable) to clean up its internal callbacks from `'Awaitable'`-s that ended up unused.
+
+### .anyIn(awaitables): _function: 'CheckpointInstance'_ (since 1.4)
+
+- `awaitables`: _Array_ or _Dictionary_ (of _'Awaitable'_, _Promise_, _iterator_) or _Array_ - array or associative array of awaitable objects
+- return: handle of the created checkpoint instance
+
+A version of `.anyOf` that arranges results or errors as an ordered array/dictionary. A result or an error of an `'Awaitable'` will be put under the same key/index in the `.results` or `.errors` (see below) as the `'Awaitable'` was in the `awaitables` array/dictionary.
+
+Existing more for symmetry than for actual use (ordering results is a questionable convenience in "any" scenario), `.anyIn` can still be a utility in some specific cases:
+
+```js
+function *getAsyncValueWithTimeout() {
+  var data = Checkpoint.anyOf({
+    result: getAsyncValue(),
+    timeout: start(function *() {
+      setTimeout(SYNC, 1000), yield *SYNCW();
+      return true;
+    })
+  }).await (SYNC), yield *SYNCW;
+
+  if (data.results.timeout) {
+    console.log("Timeout occurred!");
+    return null;
+  }
+
+  return result;
+}
+```
 
 ## 'CheckpointInstance': _class_
 
 - implements: `'Awaitable'`
 - implements: `'Cancellable'`
-- implements: `'Promise-ish'` (since 1.3.0)
+- implements: `'Promise-ish'` (since 1.3)
 
 The "handle" to actual instance of the checkpoint. Exposes waiting operations and access to the total results.
 
@@ -815,7 +916,7 @@ In any outcome, `CheckpointResult` collects errors and results of the involved a
 
 - `cancelMsg`: _any_ - optional cancel message
 
-Cancels the checkpoint. All pending `Awaitable`-s which are `Cancellable`-s are canceled as well, with the given cancel message.
+Cancels the checkpoint. All pending `'Awaitable'`-s which are `Cancellable`-s are canceled as well, with the given cancel message.
 
 Note that calling `.cancel` even after checkpoint has finished is meaningful in `.stopOnFirstError` mode or for `.anyOf` checkpoint type.
 
@@ -824,7 +925,7 @@ Note that calling `.cancel` even after checkpoint has finished is meaningful in 
 - `yes`: _Boolean_ - true if checkpoint must stop on first error, default is `false`
 - return: the subject `'CheckpointInstance'`, use for chaining calls
 
-By default, the checkpoint awaits until the whole given set of `Awaitable`-s finishes, regardless on which of them ended in error. But this may be not always practical. By setting "stop on first error" mode, you tell the checkpoint to finish after first error occurs.
+By default, the checkpoint awaits until the whole given set of `'Awaitable'`-s finishes, regardless on which of them ended in error. But this may be not always practical. By setting "stop on first error" mode, you tell the checkpoint to finish after first error occurs.
 
 ```js
 function *failingOneMakesWaitingForOthersMeaningless() {
@@ -839,7 +940,7 @@ function *failingOneMakesWaitingForOthersMeaningless() {
 - `yes`: _Boolean_ - true if checkpoint must cancel abandoned awaitables on early finish, default is `false`
 - return: the subject `'CheckpointInstance'`, use for chaining calls
 
-On early finish (in `.anyOf` mode or to error of an `Awaitable` in `.stopOnFirstError` mode), the remaining unfinished `Awaitable`-s are abandoned and normally are left to proceed, though with no effect on the checkpoint. But just leaving them running may not be always desirable. You can enable "cancel abandoned" mode to force automatic cancel if early finish is encountered.
+On early finish (in `.anyOf` mode or to error of an `'Awaitable'` in `.stopOnFirstError` mode), the remaining unfinished `'Awaitable'`-s are abandoned and normally are left to proceed, though with no effect on the checkpoint. But just leaving them running may not be always desirable. You can enable "cancel abandoned" mode to force automatic cancel if early finish is encountered.
 
 Equivalent to using `.cancelAbandoned` is to use manual `.cancel` on a finished checkpoint.
 
@@ -864,13 +965,15 @@ function *digOrDie() {
 }
 ```
 
-### .errors: _Array or undefined_
+### .errors: _Array/Object or undefined_
 
-Read-only. Is `undefined` until the checkpoint is `.done`, then is set to array that contains error values delivered by the `Awaitable`-s that have finished with errors. No guarantee on order of the errors is given, nor on the `Awaitable`-s they origin from. Use this property if order and origin of errors is not important, or if you are sure the error values contain custom tag information you need.
+Read-only. Is `undefined` until the checkpoint is `.done`, then is set to array that contains error values delivered by the `'Awaitable'`-s that have finished with errors. No guarantee on order of the errors is given, nor on the `'Awaitable'`-s they origin from. Use this property if order and origin of errors is not important, or if you are sure the error values contain custom tag information you need.
 
-### .results: _Array or undefined_
+Since 1.4, if the checkpoint was `allIn` / `anyIn`, the `.errors` will be an array or an object where an error delivered by an `'Awaitable'` will be put under the same key as the `'Awaitable'` was in source array/object. For `'Awaitable'` that completed with no error, the entry under the corresponding key in `.errors` will be set to undefined (but the key itself will still be present).
 
-Read-only. Is `undefined` until the checkpoint is `.done`, then is set to array that contains result values delivered by the `Awaitable`-s that have finished normally. No guarantee on order of the results is given, nor on the `Awaitable`-s they origin from, so considerations similar to `.errors` apply.
+### .results: _Array/Object or undefined_
+
+Read-only. Is `undefined` until the checkpoint is `.done`, then is set to array that contains result values delivered by the `'Awaitable'`-s that have finished normally. No guarantee on order of the results is given, nor on the `'Awaitable'`-s they origin from, so considerations similar to `.errors` apply.
 
 ```js
 function *doStuff() {
@@ -890,6 +993,26 @@ function *doStuff() {
 }
 ```
 
+Since 1.4, if the checkpoint was `allIn` / `anyIn`, the `.results` will be an array or an object where a result delivered by an `'Awaitable'` will be put under the same key as the `'Awaitable'` was in source array/object. For `'Awaitable'` that completed with an error, the entry under the corresponding key in `.results` will be set to undefined (but the key itself will still be present).
+
+```js
+function *doAnotherStuff() {
+    var theCheckpoint = Checkpoint.allIn({
+      a: start(getAsyncA),
+      b: start(getAsyncB),
+      c: start(getAsyncC)
+    });
+    try {
+      theCheckpoint.await(SYNC), yield *SYNCW();
+      console.log(`Got a = ${theChecpoint.results.a}`);
+      console.log(`Got b = ${theChecpoint.results.b}`);
+      console.log(`Got c = ${theChecpoint.results.c}`);
+    } catch(e) {
+      console.log("There were one or more errors:", theCheckpoint.errors);
+    }
+}
+```
+
 ## CheckpointResult: _class_
 
 Instance of this class represents a checkpoint results. Basically it duplicates `'CheckpointInstance'`'s `.errors` and `.results`, but they are delivered in different way which may be more handy. `CheckpointResult` can be delivered:
@@ -897,6 +1020,8 @@ Instance of this class represents a checkpoint results. Basically it duplicates 
 - thrown as error if checkpoint finishes in error.
 
 `CheckpointResult` as a value can be checked against by `instanceof` expression to check if an object is an instance of `CheckpointResult`.
+
+*NOTE*: prior to `crtk` 1.4, `instanceof CheckpointResult` was only guaranteed to work properly if the source `'CheckpointInstance'` was created in the same module that does the check.
 
 ```js
 const {
@@ -921,7 +1046,7 @@ function *makeUseOfCheckpointResult() {
 }
 ```
 
-Manual construction and passing/throwing `CheckpointResult` around is not recommended, in order to ensure logical consistency of checks for it inside `catch` handlers.
+Manual construction of `CheckpointResult` is intentionally prohibited, and its passing/throwing around is not recommended, in order to ensure logical consistency of checks for it inside `catch` handlers.
 
 ### .errors: _Array_
 
@@ -941,7 +1066,7 @@ Stack trace of throwing the `CheckpointResult`. Is only defined if `CheckpointRe
 
 Returns stringification of `CheckpointResult` (message of form "CheckpointResult: errors = [...], successes = [...]").
 
-## Promise.prototype: _patched ES class_ (since 1.3.0)
+## Promise.prototype: _patched ES class_ (since 1.3)
 
 - implements: `'Awaitable'`
 
@@ -970,9 +1095,9 @@ After `Promise` instance is `.done == true` and the result was rejection, `.erro
 
 After `Promise` instance is `.done == true` and the result was a success, `.result` field will be defined and contain the result value (one provided in the promise fulfillment).
 
-## NowThen: _class_ (since 1.3.0)
+## NowThen: _class_ (since 1.3)
 
-When writing a coroutine based on an `async` function, the `crtk` pseudo-globals including `SYNC`, `SYNCTL` and `SYNCW` are not available. In order to deal with callback driven functions under this condition, `NowThen` helper is provided.
+When writing a coroutine based on an `async` function, the `crtk` pseudo-globals including `SYNC`, `SYNCTL` and `SYNCW` are not available. In order to deal with callback driven functions under this condition, `NowThen` helper is provided. Besides, since 1.4 `NowThen` also provides a number of convenience utilities for control flow.
 
 ```js
 const {
@@ -995,6 +1120,10 @@ var waitingPromise = waitFor250Ms();
 ```
 
 The pattern works exactly like `crtk`'s standard `SYNC[TL]` / `SYNCW`, just inside an `async` function.
+
+Besides that, since 1.4 `NowThen` also provides a tool to insert a voluntary control yield (allowing some asynchronous code to run) into a long-running synchronous code after a given time slice. This feature can be used in both generator based and `async` function based coroutines.
+
+It is highly recommended to use a single instance of `NowThen` as a local variable only accessible inside the continious call stack of a coroutine function, and mark `try` / `catch` / `finally` clauses using `TRY` / `CATCH` / `FINALLY` helpers (see examples below in the respective section). While this pattern is not a strict "must", it will enable you to make correct use of `NowThen`'s control flow helpers, such as `timeslice*` and `aft`.
 
 ### .SYNC: _function(err, result)_
 
@@ -1019,7 +1148,7 @@ async function userFunction() {
 }
 ```
 
-`NowThen` instance is inherently reusable, and essentially works as `.SYNC[TL]` / `SYNCW` stack: reading these from the same instance can be 'nested', so that `.SYNCW` delivers promises corresponding to correct `.SYNC[TL]`-s even in complex expressions, and you can work (though not forced to) with one single instance of `NowThen`:
+The pattern above essentially works as `.SYNC[TL]` / `SYNCW` stack: reading these from the same instance can be 'nested', so that `.SYNCW` delivers promises corresponding to correct `.SYNC[TL]`-s even in complex expressions (provided you use the same instance of `NowThen`):
 
 ```js
 async function userFunction() {
@@ -1035,4 +1164,391 @@ async function userFunction() {
 }
 ```
 
-Technically it is sufficient to have one `NowThen` instance per whole module at all, but it is recommended to make it a local variable and set it to a new instance in every `async` function. This way you ensure that possible misuse of an instance does not have side effects on the others.
+Be sure to always have a `.SYNCW` matching `.SYNC[TL]` as immediately as possible, so that this 'stack' didn't start to grow. There is a subtle issue possible here:
+
+```js
+function trickyFunc(callback, i) {
+  if (Math.random() % 1) throw Error("hehe");
+  setTimeout(function() { callback(null, i + 1); }, 1000);
+}
+
+async function userFunction() {
+  var nt = NowThen();
+  for (var i = 0; i < 100500; i++) {
+    try {
+      await(trickyFunc(nt.SYNC,
+          1 + await(trickyFunc(nt.SYNC, 2), nt.SYNCW)
+        ), nt.SYNCW);
+    } catch (e) {
+      console.log("Error encountered: " + e);
+    }
+  }
+}
+```
+
+The `trickyFunc(calback, 2)` can throw before the control gets to outer `nt.SYNCW`, and the outer `nt.SYNC`-s will accumulate in the loop. To avoid this problem, use the `TRY` / `CATCH` / `FINALLY` helper (see below for details):
+
+```js
+async function userFunction() {
+  var nt = NowThen();
+  for (var i = 0; i < 100500; i++) {
+    try {
+      nt.TRY;
+      await(trickyFunc(nt.SYNC,
+          1 + await(trickyFunc(nt.SYNC, 2), nt.SYNCW)
+        ), nt.SYNCW);
+    } catch (e) {
+      nt.FINALLY;
+      console.log("Error encountered: " + e);
+    }
+  }
+}
+```
+
+
+### .timesliceUsedUp(span): _method: Boolean_ (since 1.4)
+
+- `span`: _Number_ - amount of milliseconds advised for the current synchronous code time slice
+
+This function measures time elapsed since resumption of the current synchronous piece code, and returns `true` if control yield is advised. The yield can be achieved via `.timesliceYield` method (see below, and also the example):
+
+```js
+async function asyncFunction() {
+  var nt = NowThen();
+
+  for (var i = 0; i < 1000000000; i++) {
+    // this synchronous code will attempt to yield every 100 milliseconds
+    // of continuous running
+    if (nt.timesliceUsedUp(100)) {
+      await(nt.timesliceYield); // note timesliceYield is not called as method
+    }
+  }
+}
+```
+
+Timeslice counter is reset on every `yield *SYNCW()` (or `await(nt.SYNCW)` in `async` function based coroutine).
+
+```js
+// qsort example adapted from https://medium.com/devschacht/nicholas-c-zakas-computer-science-in-javascript-quicksort-afa07c0a47f0
+function *quickSortAsync(items) {
+  var nt = NowThen();
+
+  // direct use of timesliceUsedUp/timesliceYield every time is a bit verbose,
+  // so wrap it into a helper
+  function *possiblyYield() {
+    if (nt.timesliceUsedUp(100)) {
+      nt.timesliceYield.await(SYNC), yield *SYNCW();
+    }
+  }
+
+  function *partition(left, right) {
+      var pivot = items[Math.floor((right + left) / 2)],
+          i = left, j = right;
+      while (i <= j) {
+          while (items[i] < pivot) {
+              i++;
+              yield *possiblyYield();
+          }
+          while (items[j] > pivot) {
+              j--;
+              yield *possiblyYield();
+          }
+          if (i <= j) {
+              swap(items, i, j);
+              i++; j--;
+              yield *possiblyYield();
+          }
+      }
+      return i;
+  }
+
+  function *qsortInner(left, right) {
+    var index;
+    if (items.length > 1) {
+        left = typeof left != "number" ? 0 : left;
+        right = typeof right != "number" ? items.length - 1 : right;
+        index = yield *partition(left, right);
+        if (left < index - 1) {
+            yield *quickSortInner(left, index - 1);
+        }
+        if (index < right) {
+            yield *quickSortInner(index, right);
+        }
+        yield *possiblyYield();
+    }
+
+    return items;
+  }
+
+  return (yield *qsortInner());
+}
+
+...
+start(quickSort(items));
+```
+
+When using `.timesliceUsedUp` and `.timesliceYield` it is essential that the `NowThen` object was a local variable to the block that constitutes the continuous workflow, otherwise timing calculations will not be correct.
+
+### .timesliceUsedUp: _'Awaitable'_ (since 1.4)
+
+Returns an `'Awaitable'` that can be awaited on to yield the current coroutine and resume it on next asynchronous occasion. Can be used on its own to add a yield point to an otherwise synchronous piece of code, but it can be more productive to combine it with `.timesliceUsedUp` so that you only yield when it gets reasonable.
+
+When using `.timesliceYield` in conjunction with `.timesliceUsedUp`, you must use the same `NowThen` instance, and it is essential that it was a local variable to the block that constitutes the continuous workflow, otherwise timing calculations will not be correct.
+
+### TRY / CATCH / FINALLY:  _void_ (since 1.4)
+
+The `TRY` / `CATCH` /  `FINALLY` is a helper to make up for absence of "try-with-resources" or desctructor concepts in JavaScript. It is supposed to work like this:
+
+```js
+const {
+  NowThen
+} = require('crtk');
+
+async function someFunction() {
+  var nt = NowThen();
+
+  try {
+    nt.TRY; // first statement in try block - creates a clenaup frame
+
+    var smth = openSomething();
+    // adds cleanup code to the clenaup frame
+    nt.aft(() => closeSomething(smth));
+
+    smth.blahblahblah();
+  } catch (e) {
+    nt.CATCH; // first statement in catch block - unwind cleanup frame
+  } finally {
+    nt.FINALLY; // first statement in finally block - unwind cleanup frame
+    // and close it
+  }
+}
+```
+
+`TRY` statement marks beginning of a cleanup frame. `FINALLY` executes the cleanup code pushed in the current cleanup frame (via `aft` method, see below) and closes it. `CATCH` executes the cleanup code, but doesn't close the frame, so more cleanup can be pushed in it between `CATCH` and `FINALLY` to be executed at `FINALLY`.
+
+Cleanup frames can be nested - the cleanup code is pushed into the innermost (current) one:
+
+```js
+async function someFunction() {
+  var nt = NowThen();
+
+  try {
+    nt.TRY;
+    var smthOuter = openSomething();
+    nt.aft(() => closeSomething(smthOuter));
+
+    for (var i = 0; i < 10; i++) {
+      try {
+        var smthInner = openSomething();
+        nt.aft(() => closeSomething(smthInner));
+        smthInner.blahblahblah();
+      } catch (e) {
+        // this CATCH or FINALLY will execute closeSomething(smthInner),
+        // but not the closeSomething(smthOuter) which is pushed to the
+        // outer frame
+        nt.CATCH;
+      } finally {
+        nt.FINALLY;
+      }
+    }
+  } catch (e) {
+    // only this CATCH or FINALLY will execute closeSomething(smthOuter)
+    nt.CATCH;
+  } finally {
+    nt.FINALLY;
+  }
+}
+```
+
+If there is no `catch` clause, `CATCH` can be omitted. If there is only `catch` and no `finally` however, you should use `FINALLY` in place of `CATCH`:
+
+```js
+async function someFunction() {
+  var nt = NowThen();
+
+  try {
+    nt.TRY;
+    var smth = openSomething();
+    nt.aft(() => closeSomething(smth));
+  } finally {
+    nt.FINALLY;
+  }
+
+  try {
+    nt.TRY;
+    var smth = openSomething();
+    nt.aft(() => closeSomething(smth));
+  } catch(e) {
+    // there is only catch here, so use nt.FINALLY
+    nt.FINALLY;
+  }
+}
+```
+
+Creation of `NowThen` instance implicitly creates one cleanup frame for convenience, so even if you have no `try` / `catch` / `finally` you can still make use of the cleanup, just don't forget to finalize the scope with `FINALLY`:
+
+```js
+async function someFunction() {
+  var nt = NowThen();
+
+  var smth = openSomething();
+  nt.aft(() => closeSomething(smth));
+
+  smth.blahblahblah();
+
+  nt.FINALLY; // note however, this way the statement and hence the cleanup code
+  // won't execute if an exception is thrown in between; if your code is not
+  // exception safe you should wrap it into try/finally as in examples above
+}
+```
+
+There are some points to keep in mind when using `TRY` / `aft` / `CATCH` / `FINALLY` feature:
+
+1) You must (naturally) call them all on the _same_ `NowThen` instance.
+
+```js
+async function someFunction() {
+  var nt = NowThen(),
+    nt2 = NowThen();
+    // note that having 2nd NowThen instance in the scope is actually bad idea
+
+  try {
+    nt.TRY;
+    var smth = openSomething();
+    nt.aft(() => closeSomething(smth));
+
+    try {
+      nt.TRY; // correct, provided that you mean a nested scope
+      // nt2.TRY; - NOT correct
+    } finally {
+      nt.FINALLY;
+    }
+
+  } catch (e) {
+    nt.CATCH; // correct
+    //nt2.CATCH; - NOT correct
+  } finally {
+    nt.FINALLY; // correct
+    //nt2.CATCH; - NOT correct
+  }
+}
+```
+
+2) The `NowThen` instance must only be used by the code that is linked with its declaration scope in a continuous call stack. I. e.:
+
+```js
+async function someFunction() {
+  var nt = NowThen();
+
+  // this function...
+  async function f1() {
+    try {
+      open();
+      nt.aft(() => close());
+    } finally {
+      nt.FINALLY;
+    }
+  }
+  // ...is called in pseudo-synchronous way and is therefore executed
+  // within the current call stack - it is ok for it to use the outer nt
+  await(f1());
+
+  // this function...
+  async function f2() {
+    var nt = NowThen(); // (note this!)
+    try {
+      open();
+      nt.aft(() => close());
+    } finally {
+      nt.FINALLY;
+    }
+  }
+  // ...is executed asynchronously, and therefore outside the current call
+  // stack - it MUST NOT use the outer nt and must declare its own
+  start(f2());
+
+  // it never hurts though to create an inner instance of nt, even if one
+  // is not necessarily needed - and it is possibly better to adhere to that way
+  // to keep uniform
+  // the more so different NowThen instances have no effect on each other
+  async function f1_1() {
+    var nt = NowThen();
+    try {
+      open();
+      nt.aft(() => close());
+    } finally {
+      nt.FINALLY;
+    }
+  }
+  await(f1_1());
+
+  nt.FINALLY;
+}
+```
+
+If you get a grasp on how all this works altogether, you can combine the statements in less verbose and orthodox way, provided you understand the caveats:
+
+```js
+async function someFunction() {
+  var nt = NowThen();
+  for (var i = 0; i < 10; i++) {
+    nt.TRY;
+    var smthI = openSomething(i);
+    nt.aft(() => closeSomething(smthI));
+
+    for (var j = 0; j < 10; j++) {
+      nt.TRY;
+      var smthJ = openSomething(i);
+      nt.aft(() => closeSomething(smthJ));
+
+      smthI.blahblahblah();
+      smthJ.blahblahblah();
+      nt.FINALLY;
+    }
+    nt.FINALLY;
+  }
+
+  //...but if an exception flies through, it will be sad
+}
+```
+
+Note that, although the examples above are for `async` functions, the `TRY` / `CATCH` / `FINALLY` feature can be used in generator based coroutines as well, and actually even in normal functions without any asynchronous code.
+
+### .aft(dtor): _method_ (since 1.4)
+
+- dtor: _Function_ - a cleanup code to push
+
+Pushes a cleanup code (a function, most typically a lambda expression) into the current cleanup frame that will be called on this frame's `CATCH` or `FINALLY`.
+
+Things to keep in mind:
+
+- the cleanup code must be a plain, non-async, non-generator function. The cleanup is always executed synchronously. If you have to do await for something asynchronous as part of cleanup agenda, start a coroutine from the cleanup code and (if needed) leverage `Awaiter` or `Checkpoint` in the main flow to sync with cleanup coroutine(s).
+- the cleanup functions will be executed in the reverse order (to which they were pushed in).
+
+```js
+async function someFunction() {
+  var nt = NowThen();
+  nt.aft(() => console.log("1"));
+  nt.aft(() => console.log("2"));
+  nt.aft(() => console.log("3"));
+
+  nt.FINALLY; // 3 2 1
+}
+```
+
+- all of the functions pushed to the frame will be attempted to run exactly once, even if some of them throws an uncaught exception; that exception however will be noted and re-thrown after `CATCH` or `FINALLY` statement completes. If multiple exceptions are accumulated at that point, only one of them will be re-thrown and others will be lost.
+- a function pushed to the frame by a single `.aft` is one-shot - once called in `CATCH`, it won't re-execute at `FINALLY`.
+
+```js
+async function someFunction() {
+  var nt = NowThen();
+  try {
+    nt.aft(() => console.log("1"));
+    ...
+  } catch (e) {
+    nt.CATCH; // 1
+  } finally {
+    nt.FINALLY; // 1 here only if there has been no exception
+  }
+}
+```
